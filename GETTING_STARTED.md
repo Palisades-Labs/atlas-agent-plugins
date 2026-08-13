@@ -14,14 +14,14 @@ This walkthrough takes you from a fresh install to your first Atlas commands. It
 **Claude Code**
 
 ```
-/plugin marketplace add Palisades-Labs/atlas-agent-plugins@atlas--v0.1.6
+/plugin marketplace add Palisades-Labs/atlas-agent-plugins@atlas--v0.1.7
 /plugin install atlas@atlas-plugins
 ```
 
 **Codex**
 
 ```
-codex plugin marketplace add Palisades-Labs/atlas-agent-plugins --ref atlas--v0.1.6
+codex plugin marketplace add Palisades-Labs/atlas-agent-plugins --ref atlas--v0.1.7
 codex plugin add atlas@atlas-plugins
 ```
 
@@ -30,7 +30,7 @@ codex plugin add atlas@atlas-plugins
 Install Atlas from Cursor Marketplace once it is listed. Team and Enterprise admins can instead import this GitHub repository from Dashboard → Plugins. For local testing before listing:
 
 ```
-git clone --branch atlas--v0.1.6 --depth 1 https://github.com/Palisades-Labs/atlas-agent-plugins.git
+git clone --branch atlas--v0.1.7 --depth 1 https://github.com/Palisades-Labs/atlas-agent-plugins.git
 mkdir -p ~/.cursor/plugins/local
 ln -s "$PWD/atlas-agent-plugins/atlas" ~/.cursor/plugins/local/atlas
 ```
