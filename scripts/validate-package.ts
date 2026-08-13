@@ -364,6 +364,14 @@ try {
       pinPolicyPath,
       `${JSON.stringify({ schemaVersion: 1, state: "pinned" }, null, 2)}\n`,
     );
+    // Seed the placeholder shape explicitly: once a real release pins four
+    // digests, the package's own cli-checksums no longer reproduces the
+    // comment-only bootstrap file this regression depends on (first observed
+    // on the first real pin PR, 2026-08-13).
+    writeFileSync(
+      pinChecksumsPath,
+      "# TODO(release): placeholder seeded by pinned-with-placeholder regression.\n",
+    );
     runExpectFailure(
       "clean-package pinned-with-placeholder regression",
       ["bun", join(packagedRoot, "scripts/validate-manifests.ts"), packagedRoot],
