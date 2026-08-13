@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "atlas": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "if [ -n \"$CLAUDE_PLUGIN_ROOT\" ]; then exec \"$CLAUDE_PLUGIN_ROOT/bin/atlas\" mcp; fi; exec ./bin/atlas mcp"
+      ],
+      "cwd": "."
+    }
+  }
+}

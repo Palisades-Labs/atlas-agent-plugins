@@ -1,0 +1,201 @@
+#!/bin/sh
+# atlas — POSIX launcher for the Atlas CLI.
+#
+# On first run it downloads the pinned CLI release binary for this platform,
+# verifies it, and caches it under
+# ${XDG_CACHE_HOME:-$HOME/.cache}/atlas-cli/<version>/. Subsequent runs exec
+# the cached binary directly. All arguments pass through to the CLI.
+#
+# Trust model (strongest first):
+# 1. bin/cli-checksums — per-target sha256 digests pinned at release time and
+#    shipped VIA THE MARKETPLACE PLUGIN, a separate trust root from the GitHub
+#    release assets. A tampered release asset cannot pass this check. Fails
+#    closed when the file or the target's entry is missing.
+# 2. release checksums.txt — same-source integrity (corrupt/truncated
+#    downloads); kept as a secondary check.
+# 3. `cosign verify-blob --bundle` — keyless Sigstore provenance, run when
+#    cosign is installed and this binary's signed bundle is present. The
+#    certificate is bound to the exact builder workflow + release tag and the
+#    GitHub Actions OIDC issuer. Network/tooling failures skip with a notice
+#    after both checksum layers pass. A present bundle whose signature,
+#    identity, issuer, or subject does not verify is fatal. Skipped silently
+#    when cosign is absent.
+set -eu
+
+# Single source of truth for the release repo. Override with the
+# ATLAS_PLUGIN_REPO env var; change the default here if the owner changes.
+ATLAS_PLUGIN_REPO="${ATLAS_PLUGIN_REPO:-Palisades-Labs/atlas-agent-plugins}"
+
+# Keyless signing uses the GitHub Actions OIDC identity of this exact workflow.
+# A fork may override these, but the defaults match release-cli.yml exactly.
+ATLAS_SIGNER_WORKFLOW="${ATLAS_SIGNER_WORKFLOW:-https://github.com/blast-double/auto-prospector/.github/workflows/release-cli.yml}"
+ATLAS_OIDC_ISSUER="${ATLAS_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
+
+err() {
+  printf 'atlas launcher: %s\n' "$1" >&2
+  exit 1
+}
+
+sha256_file() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    err "shasum or sha256sum is required to verify the Atlas CLI"
+  fi
+}
+
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+
+[ -f "$SCRIPT_DIR/cli-version" ] || err "cli-version not found at $SCRIPT_DIR/cli-version"
+VERSION=$(tr -d ' \t\r\n' < "$SCRIPT_DIR/cli-version")
+[ -n "$VERSION" ] || err "cli-version is empty at $SCRIPT_DIR/cli-version"
+printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$' \
+  || err "cli-version is not valid semver: $VERSION"
+ATLAS_SIGNER_IDENTITY="${ATLAS_SIGNER_IDENTITY:-${ATLAS_SIGNER_WORKFLOW}@refs/tags/cli-v${VERSION}}"
+
+# MCP hosts often auto-start the launcher immediately after plugin install. If
+# authentication is absent, fail before platform resolution, cache setup, or a
+# multi-minute verified download. `atlas login` itself remains allowed to fetch
+# the CLI and create the credentials file.
+ATLAS_CREDENTIALS_FILE="${ATLAS_CONFIG_HOME:-$HOME/.config/atlas}/credentials.json"
+if [ "${1:-}" = "mcp" ] && [ -z "${ATLAS_API_KEY:-}" ] && [ ! -s "$ATLAS_CREDENTIALS_FILE" ]; then
+  printf "run 'atlas login' first, then restart your agent\n" >&2
+  exit 3
+fi
+
+case "$(uname -s)" in
+  Darwin) OS=darwin ;;
+  Linux)  OS=linux ;;
+  *) err "unsupported operating system: $(uname -s) (supported: macOS, Linux)" ;;
+esac
+
+case "$(uname -m)" in
+  arm64|aarch64) ARCH=arm64 ;;
+  x86_64|amd64)  ARCH=x64 ;;
+  *) err "unsupported architecture: $(uname -m) (supported: arm64, x64)" ;;
+esac
+
+# Atlas CLI binaries are linked against glibc; musl-based distros can't run them.
+if [ "$OS" = "linux" ] && command -v ldd >/dev/null 2>&1; then
+  if ldd --version 2>&1 | grep -qi musl; then
+    err "musl-based Linux (e.g. Alpine) is not supported — Atlas CLI binaries require glibc"
+  fi
+fi
+
+TARGET="$OS-$ARCH"
+VERSIONS_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/atlas-cli"
+CACHE_DIR="$VERSIONS_DIR/$VERSION"
+BIN="$CACHE_DIR/atlas-$TARGET"
+CHECKSUMS_PIN="$SCRIPT_DIR/cli-checksums"
+[ -f "$CHECKSUMS_PIN" ] || err "cli-checksums not found at $CHECKSUMS_PIN — cannot verify the CLI (failing closed)"
+
+# Require exactly one pinned digest for this platform. This protects against a
+# hand-edited duplicate where different checksum tools might choose different
+# lines, and it runs even on cache hits.
+PIN_LINES=$(awk -v asset="atlas-$TARGET" '$2 == asset { print $0 }' "$CHECKSUMS_PIN")
+PIN_COUNT=$(printf '%s\n' "$PIN_LINES" | awk 'NF { count += 1 } END { print count + 0 }')
+[ "$PIN_COUNT" -eq 1 ] \
+  || err "cli-checksums must contain exactly one pinned digest for atlas-$TARGET (found $PIN_COUNT; failing closed); update the atlas plugin"
+EXPECTED_PIN=$(printf '%s\n' "$PIN_LINES" | awk '{print $1}')
+printf '%s\n' "$EXPECTED_PIN" | grep -Eq '^[0-9a-f]{64}$' \
+  || err "cli-checksums contains a malformed digest for atlas-$TARGET (failing closed)"
+
+# Best-effort prune of SUPERSEDED version caches (upgrade leftovers). AGE-GATED
+# by policy, never by upgrade: a just-superseded version stays on disk (it may
+# be an active rollback target — a plugin downgrade re-pins it), and only dirs
+# untouched for 30+ days are removed. The currently pinned $VERSION dir is
+# excluded by name regardless of age. `-prune` keeps find from descending into
+# dirs it is about to delete; errors (e.g. dir not yet created) are swallowed.
+find "$VERSIONS_DIR" -mindepth 1 -maxdepth 1 -type d ! -name "$VERSION" -mtime +30 -prune -exec rm -rf {} + 2>/dev/null || true
+
+# Best-effort prune of stale .download.* dirs left behind by interrupted runs
+# (the EXIT trap below can't fire on SIGKILL / power loss). AGE-GATED to dirs
+# older than 1 hour: a blanket prune raced concurrent first-runs and deleted
+# another process's in-flight download — a fresh dir is someone's live
+# download, only hour-old ones are orphans. `-mmin` is portable across
+# macOS/Linux find; a not-yet-created cache dir is swallowed by the redirect.
+find "$CACHE_DIR" -maxdepth 1 -name '.download.*' -mmin +60 -exec rm -rf {} + 2>/dev/null || true
+
+# A cache hit is not trusted merely because it is executable. Re-hash on every
+# invocation against the digest shipped in the plugin. If the cache was
+# corrupted or replaced, delete only that target and fetch a verified copy.
+if [ -e "$BIN" ]; then
+  if [ ! -f "$BIN" ] || [ "$(sha256_file "$BIN")" != "$EXPECTED_PIN" ]; then
+    rm -f "$BIN" 2>/dev/null || err "cached CLI at $BIN is invalid and could not be removed"
+    printf 'atlas launcher: cached atlas-%s failed pinned digest verification — deleted; downloading a verified copy\n' "$TARGET" >&2
+  fi
+fi
+
+if [ ! -x "$BIN" ]; then
+  command -v curl >/dev/null 2>&1 || err "curl is required to download the Atlas CLI"
+
+  mkdir -p "$CACHE_DIR"
+  TMP_DIR=$(mktemp -d "$CACHE_DIR/.download.XXXXXX") || err "failed to create download directory in $CACHE_DIR"
+  trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
+
+  BASE_URL="https://github.com/${ATLAS_PLUGIN_REPO}/releases/download/atlas-cli-v${VERSION}"
+
+  printf 'atlas launcher: Atlas CLI %s for %s is not cached — downloading and verifying it (first start can take a few minutes)\n' "$VERSION" "$TARGET" >&2
+
+  curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 10 --max-time 180 \
+    -o "$TMP_DIR/atlas-$TARGET" "$BASE_URL/atlas-$TARGET" \
+    || err "failed to download $BASE_URL/atlas-$TARGET"
+  curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 10 --max-time 60 \
+    -o "$TMP_DIR/checksums.txt" "$BASE_URL/checksums.txt" \
+    || err "failed to download $BASE_URL/checksums.txt"
+
+  # ── Verification 1 (PRIMARY, fail closed): pinned digest from bin/cli-checksums.
+  # This file ships via the marketplace plugin — a trust root independent of
+  # the GitHub release assets — so a swapped release binary cannot pass.
+  ACTUAL_HASH=$(sha256_file "$TMP_DIR/atlas-$TARGET")
+  if [ "$ACTUAL_HASH" != "$EXPECTED_PIN" ]; then
+    rm -f "$TMP_DIR/atlas-$TARGET"
+    err "pinned digest verification failed for atlas-$TARGET — the download does not match cli-checksums; download deleted"
+  fi
+
+  # ── Verification 2 (secondary): the release's own checksums.txt. Filter the
+  # manifest down to the one binary we downloaded — the other platform entries
+  # reference files that are intentionally absent here, so checking the full
+  # manifest would always fail.
+  RELEASE_LINES=$(awk -v asset="atlas-$TARGET" '$2 == asset { print $0 }' "$TMP_DIR/checksums.txt")
+  RELEASE_COUNT=$(printf '%s\n' "$RELEASE_LINES" | awk 'NF { count += 1 } END { print count + 0 }')
+  [ "$RELEASE_COUNT" -eq 1 ] || err "checksums.txt must contain exactly one entry for atlas-$TARGET (found $RELEASE_COUNT)"
+  RELEASE_HASH=$(printf '%s\n' "$RELEASE_LINES" | awk '{print $1}')
+  if [ "$ACTUAL_HASH" != "$RELEASE_HASH" ]; then
+    rm -f "$TMP_DIR/atlas-$TARGET"
+    err "checksum verification failed for atlas-$TARGET — download deleted; re-run to retry"
+  fi
+
+  # ── Verification 3 (when available): keyless Sigstore bundle for this exact
+  # binary. Verification needs no repository access or GitHub authentication.
+  # Cosign may still need network access to refresh Sigstore trusted roots.
+  if command -v cosign >/dev/null 2>&1; then
+    SIGSTORE_BUNDLE="$TMP_DIR/atlas-$TARGET.sigstore.json"
+    if ! curl -fsSL --retry 2 --retry-delay 1 --connect-timeout 10 --max-time 60 \
+      -o "$SIGSTORE_BUNDLE" "$BASE_URL/atlas-$TARGET.sigstore.json"; then
+      printf 'atlas launcher: Sigstore bundle is unavailable — skipping provenance verification; checksum layers already passed\n' >&2
+    else
+      COSIGN_ERR="$TMP_DIR/cosign-verify.err"
+      if ! cosign verify-blob "$TMP_DIR/atlas-$TARGET" \
+        --bundle "$SIGSTORE_BUNDLE" \
+        --certificate-identity "$ATLAS_SIGNER_IDENTITY" \
+        --certificate-oidc-issuer "$ATLAS_OIDC_ISSUER" >/dev/null 2>"$COSIGN_ERR"; then
+        if grep -qiE 'rate limit|network|connect|i/o timeout|timed out|timeout|temporary failure|no such host|context deadline|TLS handshake|HTTP 5|unknown flag.*bundle|failed to (get|load|initialize).*trusted root|TUF.*(download|update)' "$COSIGN_ERR"; then
+          printf 'atlas launcher: Sigstore verification could not run (network/tooling failure) — skipping; checksum layers already passed\n' >&2
+        else
+          rm -f "$TMP_DIR/atlas-$TARGET"
+          err "Sigstore provenance verification failed for atlas-$TARGET (expected $ATLAS_SIGNER_IDENTITY) — download deleted"
+        fi
+      fi
+    fi
+  fi
+
+  chmod +x "$TMP_DIR/atlas-$TARGET"
+  mv "$TMP_DIR/atlas-$TARGET" "$BIN"
+  rm -rf "$TMP_DIR"
+  trap - EXIT INT TERM
+fi
+
+exec "$BIN" "$@"

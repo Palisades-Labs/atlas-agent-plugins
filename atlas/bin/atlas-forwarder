@@ -1,0 +1,186 @@
+#!/bin/sh
+# atlas-forwarder — stable terminal shim for a host-managed Atlas plugin.
+#
+# Plugin caches retain multiple versions for rollback. Filesystem mtime is not
+# an activation signal: upgrades and downgrades can touch either cache last.
+# This shim asks the selected host for its enabled Atlas plugin on every run,
+# validates the resolved cache root, and executes that exact launcher.
+set -eu
+
+err() {
+  printf 'atlas forwarder: %s\n' "$1" >&2
+  exit 1
+}
+
+CONFIG_HOME="${ATLAS_FORWARDER_CONFIG_HOME:-${ATLAS_CONFIG_HOME:-$HOME/.config/atlas}}"
+HOST_FILE="$CONFIG_HOME/plugin-host"
+INSTALL_PATH="${ATLAS_FORWARDER_INSTALL_PATH:-$HOME/.local/bin/atlas}"
+
+json_string_value() {
+  value=$1
+  value=${value#*:}
+  value=$(printf '%s\n' "$value" | sed 's/^[[:space:]]*"//; s/",[[:space:]]*$//; s/"[[:space:]]*$//')
+  case "$value" in
+    *\\*) err "host returned an escaped plugin path or identifier; refusing an ambiguous resolution" ;;
+  esac
+  printf '%s\n' "$value"
+}
+
+validate_root() {
+  root=$1
+  case "$root" in
+    /*) ;;
+    *) err "host returned a non-absolute Atlas plugin root" ;;
+  esac
+  [ -f "$root/.claude-plugin/plugin.json" ] \
+    || err "resolved plugin root has no Atlas manifest: $root"
+  [ -x "$root/bin/atlas" ] \
+    || err "resolved plugin root has no executable Atlas launcher: $root/bin/atlas"
+  printf '%s\n' "$root"
+}
+
+resolve_claude_root() {
+  command -v claude >/dev/null 2>&1 \
+    || err "Claude was selected but the claude command is unavailable"
+  listing=$(claude plugin list --json 2>/dev/null) \
+    || err "Claude could not report its active plugins"
+  roots=$(
+    printf '%s\n' "$listing" | awk '
+      /^  \{$/ {
+        in_plugin = 1
+        id = ""
+        enabled = ""
+        install_path = ""
+        next
+      }
+      in_plugin && /^    "id":/ { id = $0; next }
+      in_plugin && /^    "enabled":/ { enabled = $0; next }
+      in_plugin && /^    "installPath":/ { install_path = $0; next }
+      in_plugin && /^  \}[,]?$/ {
+        if (id ~ /"atlas@[^"]+"/ && enabled ~ /:[[:space:]]*true[,]?$/) {
+          print install_path
+        }
+        in_plugin = 0
+      }
+    '
+  )
+  count=$(printf '%s\n' "$roots" | awk 'NF { count += 1 } END { print count + 0 }')
+  [ "$count" -eq 1 ] \
+    || err "Claude must report exactly one enabled atlas plugin (found $count)"
+  root_line=$(printf '%s\n' "$roots" | awk 'NF { print; exit }')
+  [ -n "$root_line" ] || err "Claude's active Atlas plugin has no installPath"
+  root=$(json_string_value "$root_line")
+  validate_root "$root"
+}
+
+resolve_codex_root() {
+  command -v codex >/dev/null 2>&1 \
+    || err "Codex was selected but the codex command is unavailable"
+  listing=$(codex plugin list --json 2>/dev/null) \
+    || err "Codex could not report its active plugins"
+  records=$(
+    printf '%s\n' "$listing" | awk '
+      /^    \{$/ {
+        in_plugin = 1
+        plugin_id = ""
+        marketplace = ""
+        version = ""
+        installed = ""
+        enabled = ""
+        next
+      }
+      in_plugin && /^      "pluginId":/ { plugin_id = $0; next }
+      in_plugin && /^      "marketplaceName":/ { marketplace = $0; next }
+      in_plugin && /^      "version":/ { version = $0; next }
+      in_plugin && /^      "installed":/ { installed = $0; next }
+      in_plugin && /^      "enabled":/ { enabled = $0; next }
+      in_plugin && /^    \}[,]?$/ {
+        if (plugin_id ~ /"atlas@[^"]+"/ && installed ~ /:[[:space:]]*true[,]?$/ && enabled ~ /:[[:space:]]*true[,]?$/) {
+          print marketplace "\t" version
+        }
+        in_plugin = 0
+      }
+    '
+  )
+  count=$(printf '%s\n' "$records" | awk 'NF { count += 1 } END { print count + 0 }')
+  [ "$count" -eq 1 ] \
+    || err "Codex must report exactly one enabled atlas plugin (found $count)"
+  record=$(printf '%s\n' "$records" | awk 'NF { print; exit }')
+  marketplace_line=$(printf '%s\n' "$record" | awk -F '\t' '{ print $1 }')
+  version_line=$(printf '%s\n' "$record" | awk -F '\t' '{ print $2 }')
+  marketplace=$(json_string_value "$marketplace_line")
+  version=$(json_string_value "$version_line")
+  printf '%s\n' "$marketplace" | grep -Eq '^[A-Za-z0-9._-]+$' \
+    || err "Codex returned an unsafe Atlas marketplace name"
+  printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$' \
+    || err "Codex returned an invalid Atlas plugin version"
+  codex_home="${CODEX_HOME:-$HOME/.codex}"
+  validate_root "$codex_home/plugins/cache/$marketplace/atlas/$version"
+}
+
+resolve_root() {
+  host=$1
+  case "$host" in
+    claude) resolve_claude_root ;;
+    codex) resolve_codex_root ;;
+    *) err "plugin host must be exactly claude or codex" ;;
+  esac
+}
+
+write_host_selection() {
+  host=$1
+  case "$host" in
+    claude|codex) ;;
+    *) err "plugin host must be exactly claude or codex" ;;
+  esac
+  mkdir -p "$CONFIG_HOME"
+  temp_host="$HOST_FILE.tmp.$$"
+  trap 'rm -f "$temp_host"' EXIT INT TERM
+  printf '%s\n' "$host" > "$temp_host"
+  chmod 600 "$temp_host"
+  mv "$temp_host" "$HOST_FILE"
+  trap - EXIT INT TERM
+}
+
+case "${1:-}" in
+  --forwarder-install)
+    [ "$#" -eq 2 ] || err "usage: atlas-forwarder --forwarder-install claude|codex"
+    selected_root=$(resolve_root "$2")
+    [ -x "$selected_root/bin/atlas-forwarder" ] \
+      || err "active Atlas plugin has no executable terminal forwarder"
+    mkdir -p "$(dirname -- "$INSTALL_PATH")"
+    temp_install="$INSTALL_PATH.tmp.$$"
+    trap 'rm -f "$temp_install"' EXIT INT TERM
+    cp "$selected_root/bin/atlas-forwarder" "$temp_install"
+    chmod 755 "$temp_install"
+    mv "$temp_install" "$INSTALL_PATH"
+    trap - EXIT INT TERM
+    write_host_selection "$2"
+    printf 'atlas forwarder: installed %s and selected %s\n' "$INSTALL_PATH" "$2"
+    exit 0
+    ;;
+  --forwarder-select-host)
+    [ "$#" -eq 2 ] || err "usage: atlas --forwarder-select-host claude|codex"
+    resolve_root "$2" >/dev/null
+    write_host_selection "$2"
+    printf 'atlas forwarder: selected %s\n' "$2"
+    exit 0
+    ;;
+  --forwarder-resolve-root)
+    [ "$#" -eq 1 ] || err "usage: atlas --forwarder-resolve-root"
+    ;;
+esac
+
+host="${ATLAS_PLUGIN_HOST:-}"
+if [ -z "$host" ]; then
+  [ -f "$HOST_FILE" ] \
+    || err "no plugin host selected; rerun the Atlas setup skill"
+  host=$(tr -d ' \t\r\n' < "$HOST_FILE")
+fi
+
+root=$(resolve_root "$host")
+if [ "${1:-}" = "--forwarder-resolve-root" ]; then
+  printf '%s\n' "$root"
+  exit 0
+fi
+exec "$root/bin/atlas" "$@"

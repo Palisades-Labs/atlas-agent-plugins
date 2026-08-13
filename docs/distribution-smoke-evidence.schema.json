@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlasprospect.ai/schemas/distribution-smoke-evidence-v1.json",
+  "title": "Atlas distribution smoke evidence",
+  "description": "Sanitized evidence for public Atlas plugin and CLI release verification. Raw command output, credentials, durations, and machine-local paths are intentionally excluded.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "mode",
+    "result",
+    "release",
+    "application",
+    "isolation",
+    "checks",
+    "cursor"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "atlas-distribution-smoke/v1"
+    },
+    "mode": {
+      "enum": [
+        "fixture",
+        "live"
+      ]
+    },
+    "result": {
+      "enum": [
+        "passed",
+        "failed"
+      ]
+    },
+    "release": {
+      "$ref": "#/$defs/release"
+    },
+    "application": {
+      "$ref": "#/$defs/application"
+    },
+    "isolation": {
+      "$ref": "#/$defs/isolation"
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 14,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "cursor": {
+      "$ref": "#/$defs/cursor"
+    },
+    "failure": {
+      "$ref": "#/$defs/failure"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "result": {
+            "const": "passed"
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "then": {
+        "properties": {
+          "checks": {
+            "minItems": 14,
+            "maxItems": 14
+          }
+        },
+        "not": {
+          "required": [
+            "failure"
+          ]
+        }
+      },
+      "else": {
+        "required": [
+          "failure"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repositoryUrl",
+        "nMinusOneTag",
+        "nTag",
+        "cliReleaseTag",
+        "signerIdentity"
+      ],
+      "properties": {
+        "repositoryUrl": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 160,
+          "pattern": "^https://github\\.com/[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9._-]{1,100}$"
+        },
+        "nMinusOneTag": {
+          "$ref": "#/$defs/pluginReleaseTag"
+        },
+        "nTag": {
+          "$ref": "#/$defs/pluginReleaseTag"
+        },
+        "cliReleaseTag": {
+          "type": "string",
+          "pattern": "^atlas-cli-v(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"
+        },
+        "signerIdentity": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 300,
+          "pattern": "^https://github\\.com/[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9._-]{1,100}/\\.github/workflows/release-cli\\.yml@refs/tags/cli-v(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"
+        }
+      }
+    },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiOrigin",
+        "expectedSha",
+        "healthSourceSha",
+        "healthGitSha",
+        "deploymentId"
+      ],
+      "properties": {
+        "apiOrigin": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 255,
+          "pattern": "^https://[^/?#]+$"
+        },
+        "expectedSha": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "healthSourceSha": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "healthGitSha": {
+          "$ref": "#/$defs/gitSha"
+        },
+        "deploymentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9_.:-]+$"
+        }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claudeConfigFingerprint",
+        "codexHomeFingerprint",
+        "atlasConfigFingerprint",
+        "cliCacheFingerprint",
+        "globalRootsUntouched"
+      ],
+      "properties": {
+        "claudeConfigFingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "codexHomeFingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "atlasConfigFingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cliCacheFingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "globalRootsUntouched": {
+          "const": true
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "host",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/checkId"
+        },
+        "host": {
+          "enum": [
+            "shared",
+            "claude",
+            "codex"
+          ]
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed"
+          ]
+        },
+        "observedVersion": {
+          "$ref": "#/$defs/semver"
+        }
+      }
+    },
+    "cursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "evidenceSha256"
+      ],
+      "properties": {
+        "status": {
+          "const": "operator_asserted"
+        },
+        "evidenceSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "checkId"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_]{2,63}$"
+        },
+        "checkId": {
+          "$ref": "#/$defs/checkId"
+        }
+      }
+    },
+    "checkId": {
+      "enum": [
+        "public_release_preflight",
+        "application_health",
+        "claude_clean_install",
+        "claude_auth",
+        "claude_tool_discovery",
+        "claude_upgrade",
+        "claude_rollback",
+        "codex_clean_install",
+        "codex_auth",
+        "codex_tool_discovery",
+        "codex_upgrade",
+        "codex_rollback",
+        "checksum_refusal",
+        "cosign_attestation"
+      ]
+    },
+    "pluginReleaseTag": {
+      "type": "string",
+      "pattern": "^atlas--v(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"
+    },
+    "semver": {
+      "type": "string",
+      "maxLength": 255,
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "gitSha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

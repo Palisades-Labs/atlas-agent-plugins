@@ -1,0 +1,13 @@
+{
+  "name": "atlas-plugins",
+  "description": "Atlas plugins for natural-language prospecting workflows.",
+  "owner": { "name": "Palisades Labs" },
+  "plugins": [
+    {
+      "name": "atlas",
+      "source": "./atlas",
+      "description": "Drive Atlas — imports, enrichment, prospecting, exports — from your agent or terminal.",
+      "category": "Productivity"
+    }
+  ]
+}

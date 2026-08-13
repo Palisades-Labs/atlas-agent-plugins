@@ -1,0 +1,17 @@
+{
+  "name": "atlas-plugins",
+  "owner": {
+    "name": "Palisades Labs",
+    "email": "support@atlasprospect.ai"
+  },
+  "metadata": {
+    "description": "Atlas prospecting plugins for coding agents."
+  },
+  "plugins": [
+    {
+      "name": "atlas",
+      "source": "atlas",
+      "description": "Drive Atlas — imports, enrichment, prospecting, exports — from your agent or terminal."
+    }
+  ]
+}

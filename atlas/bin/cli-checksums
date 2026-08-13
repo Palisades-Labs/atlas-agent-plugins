@@ -1,0 +1,22 @@
+# cli-checksums — pinned SHA-256 digests for the CLI version in bin/cli-version.
+#
+# Trust root: this file ships via the marketplace plugin, INDEPENDENT of the
+# GitHub release assets — the launcher (bin/atlas) verifies every download
+# against it and FAILS CLOSED on a missing entry or a digest mismatch.
+#
+# Format (identical to the release's checksums.txt):
+#   <sha256 hex>  atlas-<os>-<arch>
+# one line per target: atlas-darwin-arm64, atlas-darwin-x64,
+# atlas-linux-arm64, atlas-linux-x64.
+#
+# This placeholder is accepted only while cli-pin-policy.json is in its
+# one-time "bootstrap" state. The automated CLI release workflow writes both
+# pin files from the exact artifacts it publishes and transitions that policy
+# to "pinned" in the same generated PR. The policy cannot return to bootstrap;
+# do not hand-edit a version, digest, or policy independently.
+#
+# TODO(release): release atlas-cli-v0.1.1 is NOT published yet — the release
+# URL 404s (checked 2026-07-20), so no real digests exist. The entries are
+# intentionally absent and the launcher fails closed until this file is
+# regenerated from the published release artifacts. This is safe: with no
+# published release the launcher's download step cannot succeed anyway.
