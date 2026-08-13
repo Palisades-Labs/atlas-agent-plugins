@@ -1,6 +1,6 @@
 {
   "name": "atlas",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Atlas CLI + MCP + skills: build and enrich prospect lists from agents or the terminal.",
   "author": {
     "name": "Palisades Labs",
@@ -10,7 +10,12 @@
   "homepage": "https://app.atlasprospect.ai",
   "repository": "https://github.com/Palisades-Labs/atlas-agent-plugins",
   "license": "MIT",
-  "keywords": ["prospecting", "enrichment", "sales", "mcp"],
+  "keywords": [
+    "prospecting",
+    "enrichment",
+    "sales",
+    "mcp"
+  ],
   "skills": "./skills/",
   "mcpServers": {
     "atlas": {
@@ -30,7 +35,11 @@
     "longDescription": "Import, research, enrich, filter, and export prospect lists through Atlas with safe previews and resumable workflows.",
     "developerName": "Palisades Labs",
     "category": "Productivity",
-    "capabilities": ["Read", "Write", "External actions"],
+    "capabilities": [
+      "Read",
+      "Write",
+      "External actions"
+    ],
     "websiteURL": "https://app.atlasprospect.ai",
     "privacyPolicyURL": "https://app.atlasprospect.ai/privacy",
     "termsOfServiceURL": "https://app.atlasprospect.ai/terms",
