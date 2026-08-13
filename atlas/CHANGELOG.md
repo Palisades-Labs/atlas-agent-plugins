@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7 - 2026-08-13
+
+- Pinned Atlas CLI v0.1.1 and its verified release digests.
+- Published target-specific keyless Sigstore bundles for all supported binaries.
+
 ## 0.1.6 - 2026-07-23
 
 - Replaced cache-mtime terminal routing with an active-host forwarder that follows Claude Code and Codex upgrades and true N-to-N-1 rollbacks.
