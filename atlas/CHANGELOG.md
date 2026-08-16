@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.8 - 2026-08-16
+
+- Pinned Atlas CLI v0.1.2 and its verified release digests.
+- Published target-specific keyless Sigstore bundles for all supported binaries.
+
 ## 0.1.7 - 2026-08-13
 
 - Pinned Atlas CLI v0.1.1 and its verified release digests.
