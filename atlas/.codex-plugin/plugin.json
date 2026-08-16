@@ -1,6 +1,6 @@
 {
   "name": "atlas",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Atlas CLI + MCP + skills: build and enrich prospect lists from agents or the terminal.",
   "author": {
     "name": "Palisades Labs",
