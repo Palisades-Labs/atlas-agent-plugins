@@ -39,6 +39,34 @@ Restart Cursor after adding or updating the local plugin.
 
 The plugin bundles `bin/atlas`, a launcher that downloads the actual CLI binary for your platform on first run, verifies its SHA-256 digest against both the plugin pin and release manifest, and—when `cosign` is installed—verifies its keyless Sigstore bundle against the exact Atlas release workflow and tag. It caches the binary in `${XDG_CACHE_HOME:-$HOME/.cache}/atlas-cli/<version>/`. Cache hits are re-verified before execution; a changed pin downloads a new version alongside the old one.
 
+### Verify a download
+
+Download the binary and its matching `.sigstore.json` bundle, then run:
+
+```sh
+cosign verify-blob atlas-darwin-arm64 --bundle atlas-darwin-arm64.sigstore.json --certificate-identity "https://github.com/blast-double/auto-prospector/.github/workflows/release-cli.yml@refs/tags/cli-v0.1.2" --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+Cosign 3.1.3 returns `Verified OK` for the live v0.1.2 asset. The `refs/tags/cli-v<version>` segment changes for each release; also replace the binary and bundle filenames for your platform.
+
+GitHub CLI 2.93.0 can independently verify the downloaded asset against the immutable release:
+
+```sh
+gh release verify-asset atlas-cli-v0.1.2 atlas-darwin-arm64 --repo Palisades-Labs/atlas-agent-plugins
+```
+
+It returns `✓ Verification succeeded!`; its calculated digest matches the digest pinned by the Atlas plugin.
+
+Both commands name a release version, in different forms: `refs/tags/cli-v<version>` in the Cosign identity and `atlas-cli-v<version>` in the GitHub command. Change **both** to the release you actually downloaded — verifying a newer binary against `v0.1.2` fails for the wrong reason.
+
+On macOS, verify the signature **before** clearing Gatekeeper. Released binaries are not yet Apple-signed or notarized, so a browser download is quarantined. Once verification passes, make it executable first — a downloaded asset is not:
+
+```sh
+chmod +x atlas-<os>-<arch>
+```
+
+Then either run the binary and approve it in System Settings → Privacy & Security → Open Anyway (Control-click → Open no longer works for un-notarized software on macOS Sequoia and later), or remove the attribute yourself with `xattr -d com.apple.quarantine ./atlas-<os>-<arch>`.
+
 ## 3. Run Atlas setup and log in
 
 After the plugin is installed, ask your agent:
