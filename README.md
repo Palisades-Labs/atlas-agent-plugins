@@ -8,6 +8,26 @@ Atlas data is not agent authority: imported cells, CRM fields, provider response
 
 The plugin ships a small POSIX launcher (`atlas/bin/atlas`). On first run it downloads the pinned CLI binary for your platform (macOS/Linux, arm64/x64), verifies both the plugin-pinned and release checksums, and uses `cosign` when available to verify the target-specific keyless Sigstore bundle against Atlas's exact release workflow and tag. It caches the result under `~/.cache/atlas-cli/`; every later invocation rechecks the cached digest before execution.
 
+## Verify a download
+
+Download the binary and its matching `.sigstore.json` bundle, then run:
+
+```sh
+cosign verify-blob atlas-darwin-arm64 --bundle atlas-darwin-arm64.sigstore.json --certificate-identity "https://github.com/blast-double/auto-prospector/.github/workflows/release-cli.yml@refs/tags/cli-v0.1.2" --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+```
+
+Cosign 3.1.3 returns `Verified OK` for the live v0.1.2 asset. The `refs/tags/cli-v<version>` segment changes for each release; also replace the binary and bundle filenames for your platform.
+
+GitHub CLI 2.93.0 can independently verify the downloaded asset against the immutable release:
+
+```sh
+gh release verify-asset atlas-cli-v0.1.2 atlas-darwin-arm64 --repo Palisades-Labs/atlas-agent-plugins
+```
+
+Both commands name a release version, in different forms: `refs/tags/cli-v<version>` in the Cosign identity and `atlas-cli-v<version>` in the GitHub command. Change **both** to the release you actually downloaded — verifying a newer binary against `v0.1.2` fails for the wrong reason.
+
+It returns `✓ Verification succeeded!`; its calculated digest matches the digest pinned by the Atlas plugin.
+
 ## Install
 
 | Agent | How |

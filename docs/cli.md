@@ -40,7 +40,7 @@ atlas mcp
 
 Every mutating command, plus every command that can spend BYOK model quota, uses a durable pending-request journal for its idempotency key (`--idempotency-key` overrides it). If the network fails after a request may have reached Atlas, rerunning the identical command reuses the saved key instead of duplicating work or provider spend. `dispatch_incomplete` is terminal for the old key, so the CLI clears that journal entry and the next identical command mints a new recovery key. `provider_call_uncertain` is deliberately different: the provider may already have charged the request, so the CLI keeps that key pinned and identical retries replay the needs-review receipt. Use a new key only after explicit operator review and only when another paid request is intended. Commands that dispatch runs accept `--wait` (block until the run finishes) and `--timeout <seconds>` (default 3600). With `--json` (or piped), `--wait` emits ONE final JSON document combining the dispatch response and the report; on a TTY the dispatch response prints immediately and the labelled report follows. A waited run that finishes `failed` exits 1; `cancelled` exits 7.
 
-Every current MCP tool has a curated command. `atlas tools call <tool>` remains an advanced escape hatch for scripts that want to send the server's JSON schema directly; `atlas status` lists every tool and its first-class command mapping.
+Every current MCP tool has a curated command except `atlas_read_job_evidence`, which is reached through `atlas tools call atlas_read_job_evidence`. `atlas tools call <tool>` is otherwise an advanced escape hatch for scripts that want to send the server's JSON schema directly; `atlas status` lists every tool and its first-class command mapping.
 
 ## Auth
 
@@ -273,7 +273,7 @@ atlas tools call atlas_list_sheets --json-args '{"limit":5}'
 atlas tools call atlas_read_sheet --json-args '{"table_id":"tbl_123","filter_id":"flt_1"}'
 ```
 
-Raw schema-level access to every MCP tool. This is useful for low-level automation, but every current tool also has a curated command with command-specific validation, durable retry journal, and help. `tools call` injects a fresh idempotency key when the live schema requires one, but it does not journal that key across process invocations. For a mutating or BYOK-paid raw call that may need retry, provide `idempotency_key` in `--json-args`, retain it, and reuse it after ambiguous failures. After terminal `dispatch_incomplete`, use a new key. After `provider_call_uncertain`, keep the old key pinned for replay and review provider usage; use a new key only when explicitly starting another paid request. Prefer the curated command for agent workflows.
+Raw schema-level access to every MCP tool. This is useful for low-level automation, and it is the only way to reach `atlas_read_job_evidence`; every other current tool also has a curated command with command-specific validation, durable retry journal, and help. `tools call` injects a fresh idempotency key when the live schema requires one, but it does not journal that key across process invocations. For a mutating or BYOK-paid raw call that may need retry, provide `idempotency_key` in `--json-args`, retain it, and reuse it after ambiguous failures. After terminal `dispatch_incomplete`, use a new key. After `provider_call_uncertain`, keep the old key pinned for replay and review provider usage; use a new key only when explicitly starting another paid request. Prefer the curated command for agent workflows.
 
 ## Environment variables
 

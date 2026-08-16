@@ -19,6 +19,18 @@ import { tmpdir } from "node:os";
 import { basename, join, relative, resolve, sep } from "node:path";
 
 const SOURCE = resolve(import.meta.dir, "..");
+
+// STAGING.md is legitimate ONLY in the monorepo staging copy. Filtering it out
+// of the clean copy proves it never SHIPS, but says nothing about a distribution
+// checkout that has committed it — there the file itself, and its history, are
+// the exposure. Default to strict so the promoted validator fails closed; the
+// monorepo opts in structurally (its package root is apps/agent-plugins) or
+// explicitly via the env var, so no CI call site has to change.
+const STAGING_SOURCE =
+  SOURCE.endsWith(`${sep}apps${sep}agent-plugins`) || process.env.ATLAS_PACKAGE_STAGING === "1";
+// Set when this validator invokes the packaged copy of itself, so the nested run
+// checks its own tree and stops instead of recursing into another clean copy.
+const NESTED = process.env.ATLAS_PACKAGE_NESTED === "1";
 const REQUIRED_FILES = [
   ".github/workflows/release-plugin.yml",
   ".github/workflows/validate.yml",
@@ -28,6 +40,7 @@ const REQUIRED_FILES = [
   "GETTING_STARTED.md",
   "llms.txt",
   "LICENSE",
+  "SECURITY.md",
   "docs/cli.md",
   "docs/mcp.md",
   "atlas/.claude-plugin/plugin.json",
@@ -127,7 +140,12 @@ function walk(root: string, visit: (absolute: string, rel: string) => void): voi
 
 walk(SOURCE, (absolute, rel) => {
   const name = basename(absolute);
-  if (rel === "STAGING.md") return;
+  if (rel === "STAGING.md") {
+    if (!STAGING_SOURCE) {
+      problem("STAGING.md: monorepo-only runbook must not exist in the distribution repository");
+    }
+    return;
+  }
   if (FORBIDDEN_FILENAMES.some((pattern) => pattern.test(name))) {
     problem(`${rel}: secret-bearing or generated filename must not ship`);
   }
@@ -219,10 +237,15 @@ function run(label: string, command: string[]): void {
   console.log(`${label}: OK`);
 }
 
-function runExpectFailure(label: string, command: string[], expectedMessage: string): void {
+function runExpectFailure(
+  label: string,
+  command: string[],
+  expectedMessage: string,
+  extraEnv: Record<string, string> = {},
+): void {
   const result = Bun.spawnSync(command, {
     cwd: packagedRoot,
-    env: { ...process.env },
+    env: { ...process.env, ...extraEnv },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -241,6 +264,14 @@ function runExpectFailure(label: string, command: string[], expectedMessage: str
   console.log(`${label}: OK`);
 }
 
+if (NESTED) {
+  // A nested run exists only to prove the source scan above fails closed. It
+  // must not build another clean copy, or the regression recurses forever.
+  if (process.exitCode) process.exit(process.exitCode);
+  console.log("validate-package: OK (nested source scan)");
+  process.exit(0);
+}
+
 try {
   cpSync(SOURCE, packagedRoot, {
     recursive: true,
@@ -257,6 +288,27 @@ try {
     process.exitCode = 1;
   } catch {
     // Expected: staging operations stay in the private monorepo.
+  }
+
+  // The clean copy is distribution-shaped, so it doubles as the fixture proving
+  // the promoted validator REJECTS a committed runbook rather than filtering it.
+  {
+    const leakedRunbook = join(packagedRoot, "STAGING.md");
+    writeFileSync(leakedRunbook, "# leaked staging runbook\n");
+    try {
+      runExpectFailure(
+        "clean-package staging-runbook rejection regression",
+        ["bun", join(packagedRoot, "scripts/validate-package.ts")],
+        "must not exist in the distribution repository",
+        // Force strict mode explicitly: the child inherits this process's env,
+        // so an operator running with ATLAS_PACKAGE_STAGING=1 would otherwise
+        // hand the nested run a staging opt-in, it would accept the injected
+        // runbook, and the regression would fail for the wrong reason.
+        { ATLAS_PACKAGE_NESTED: "1", ATLAS_PACKAGE_STAGING: "0" },
+      );
+    } finally {
+      rmSync(leakedRunbook, { force: true });
+    }
   }
 
   run("clean-package manifest validation", [
