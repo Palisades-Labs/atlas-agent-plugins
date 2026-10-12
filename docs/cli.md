@@ -11,9 +11,11 @@ Security boundary: CSV/Google Sheet cells, CRM fields, provider/web results, and
 ```
 atlas login | logout | whoami
 atlas status
+atlas feedback  report
 atlas sheets    create | list | read <table_id> | archive <table_id> | unarchive <table_id>
 atlas filters   compile <table_id> | list <table_id> | delete <table_id> <filter_id>
 atlas mapping   get | set
+atlas suppression add | remove | list
 atlas import    csv <file> | hubspot-list <listId> | gsheet <url-or-id>
 atlas import    inspect csv <file> | inspect gsheet <url-or-id>
 atlas rows      add <table_id> <file> | add-source-columns <table_id> | pull <table_id>
@@ -21,8 +23,12 @@ atlas rows      delete <table_id> | update-identity <table_id> <row_id>
 atlas cells     update <table_id> <row_id> <column_id>
 atlas enrich    preflight <table_id> | add <table_id> | run <column_id>
 atlas enrich    get <table_id> <column_id> | update ... | delete ...
-atlas prospects find | find-more <table_id>
+atlas schedules set <column_id> | list <table_id> | delete <column_id>
+atlas prospects find | find-from-sheet <table_id> | find-more <table_id>
 atlas discover companies
+atlas search    companies | companies-to-sheet | values
+atlas index     companies
+atlas icp       compile | save | list
 atlas build     --plan <file>
 atlas plans     quote | create | get <plan_id> | execute <plan_id>
 atlas vocabularies list
@@ -30,8 +36,10 @@ atlas personas  save
 atlas providers balances
 atlas job-changes promote --table-id <id> --job-monitor-column-id <id>
 atlas judgments list | claim | submit <batch_id>
-atlas export    gsheet <table_id> <column_id> | hubspot-list <table_id> | new-gsheet <table_id>
+atlas export    gsheet <table_id> <column_id> | hubspot-list <table_id> | hubspot-contact-list <table_id>
+atlas export    new-gsheet <table_id>
 atlas sync      hubspot <table_id> <column_id> | gsheet <table_id> | webhook <table_id>
+atlas sequences list [instantly|smartlead] | enroll <table_id>
 atlas runs      list | report <run_id> | wait <run_id> | cancel <run_id>
 atlas runs      retry <run_id> | resume <run_id>
 atlas tools     list | call <name>
@@ -40,7 +48,7 @@ atlas mcp
 
 Every mutating command, plus every command that can spend BYOK model quota, uses a durable pending-request journal for its idempotency key (`--idempotency-key` overrides it). If the network fails after a request may have reached Atlas, rerunning the identical command reuses the saved key instead of duplicating work or provider spend. `dispatch_incomplete` is terminal for the old key, so the CLI clears that journal entry and the next identical command mints a new recovery key. `provider_call_uncertain` is deliberately different: the provider may already have charged the request, so the CLI keeps that key pinned and identical retries replay the needs-review receipt. Use a new key only after explicit operator review and only when another paid request is intended. Commands that dispatch runs accept `--wait` (block until the run finishes) and `--timeout <seconds>` (default 3600). With `--json` (or piped), `--wait` emits ONE final JSON document combining the dispatch response and the report; on a TTY the dispatch response prints immediately and the labelled report follows. A waited run that finishes `failed` exits 1; `cancelled` exits 7.
 
-Every current MCP tool has a curated command except `atlas_read_job_evidence`, which is reached through `atlas tools call atlas_read_job_evidence`. `atlas tools call <tool>` is otherwise an advanced escape hatch for scripts that want to send the server's JSON schema directly; `atlas status` lists every tool and its first-class command mapping.
+The two raw-only read tools, `atlas_read_job_evidence` and `atlas_read_customer_reviews`, are reached through `atlas tools call <name>`. The per-job list behind a sheet's "Download jobs (up to 25 per company)" CSV is `atlas tools call atlas_read_job_evidence --json-args '{"table_id":"<sheet>","column_id":"<job postings column>","row_ids":["<row>"],"include_descriptions":false}'`, which returns every sampled posting as `postings`. `atlas tools call <tool>` is otherwise an advanced escape hatch for scripts that want to send the server's JSON schema directly; `atlas status` lists every tool and its first-class command mapping.
 
 ## Auth
 
@@ -132,15 +140,30 @@ atlas enrich update tbl_123 col_456 --expected-version 3 --provider-order apollo
 
 `preflight` checks inputs, placeholders, provider readiness/order, and estimated cost without creating a sheet object, writing sheet cells, or charging Atlas execution credits. Goal mode makes one bounded, journaled BYOK drafting call and can consume provider quota; explicit column/config modes make no provider call. Inspect `ready`, `blocker`, `effective_chain`, `omitted`, and `missing_integrations`; a phone waterfall with no connected provider answers `ready:false` instead of silently choosing a substitute. `add` creates a column from a natural-language `--goal` and/or a pinned `--operation`/`--config`; goal drafting also uses bounded BYOK quota, but no enrichment run starts unless you pass `--run` explicitly. `--test N` creates then runs only the first N rows (max 25) and cannot be combined with `--run`. After reviewing those cells, use `run --unrun-only` to finish without re-billing settled cells. `run` accepts either `--filter <json>` or `--filter-id <id>`. `get` returns the optimistic config version required by `update` and `delete`; `update --provider-order` changes a phone/email waterfall. For Perplexity goals, the draft uses a concise default unless the user requests another limit; “35 words” is one example, not a universal rule. See the `enrichment` skill for the required preflight/test-first workflow.
 
+A `job_monitor` column accepts `qualification_mode` (`standard` or `deterministic_only`) plus eight source/identity keys: `suppress_role_inboxes`, `role_inbox_local_parts`, `min_company_name_length`, `require_domain_corroboration`, `expected_country_codes`, `min_confidence_for_job_change`, `fetch_employment_history`, and `profile_source`. `profile_source` defaults to `auto`: Atlas while “Let Atlas scrape on my behalf” is on and the platform key is available, otherwise the organization's Apify account. Explicit `apify` or `atlas` pins that source. Apify costs about $0.004 per profile on the organization's account; Atlas charges 2 credits per delivered profile and up to 1 credit per job-change candidate for a company website lookup. Missing/empty profiles are not charged. `fetch_employment_history` is deprecated, accepted, and ignored: both active sources provide history. Configure Apify or the “Let Atlas scrape on my behalf” switch under Settings → Web Scraping. An unavailable platform key or disabled switch blocks only the Atlas route. Signed plans retain the resolved source and its provider-attempt bound.
+
+Deterministic qualification uses ordered current-employer, concurrent-current-role, same-domain, prior-employer, shared-word, and unmatched rules (R1–R6). Prior-employer matching accepts exact normalized names, company slugs, or email-domain labels, never a name prefix alone. Missing dates, titles, or company-index domains do not suppress a corroborated job change; an unresolved domain caps confidence at medium. Employment start dates retain their source precision (`YYYY`, `YYYY-MM`, or `YYYY-MM-DD`); HubSpot date-property mappings pad only at send time. Unavailable profiles fail with `profile_unavailable`; unverifiable outcomes carry a reason. Existing provenance, shared-mailbox, country, and weak-name gates remain in front of the verdict rules.
+
+## Column schedules
+
+```
+atlas schedules set col_456 --cadence-days 30 --max-rows 500
+atlas schedules list tbl_123
+atlas schedules delete col_456
+```
+
+`set` creates or replaces one enrichment column's recurring refresh: `--cadence-days` (1–90) is required, `--max-rows` caps each run, and `--disabled` saves the schedule without dispatching it. Each scheduled run refreshes already-settled cells with the column's normal provider and Atlas credits. `list` shows a sheet's schedules with row caps, next and last dispatch, failure count, and the last error. `delete` removes only the schedule — it never deletes the column or cancels a run already dispatched — and repeating it is safe.
+
 ## Prospects
 
 ```
 atlas prospects find --domain stripe.com --name "Stripe" --functions operations --seniority vp,director --wait
 atlas prospects find --domain stripe.com --name "Stripe" --functions operations --seniority vp --exact-seniority
+atlas prospects find-from-sheet tbl_companies --functions operations --seniority vp,director --row-limit 200 --wait
 atlas prospects find-more tbl_contacts --mode net-new --wait
 ```
 
-The four company/vocabulary `find` flags (`--domain`, `--name`, `--functions`, `--seniority`) are required; function and seniority ids come from `atlas vocabularies list` (not `atlas status`). `--exact-seniority` is optional: when passed, ONLY the selected seniority levels qualify — a near-miss level is excluded instead of delivered with a labelled mismatch. `find-more` reruns people discovery on an existing Atlas contact sheet; `--mode net-new` searches only company seeds not previously delivered, while `--mode all` searches every seed again. Both consume credits, and row identity dedupe still prevents duplicate contacts.
+The four company/vocabulary `find` flags (`--domain`, `--name`, `--functions`, `--seniority`) are required; function and seniority ids come from `atlas vocabularies list` (not `atlas status`). `--exact-seniority` is optional: when passed, ONLY the selected seniority levels qualify — a near-miss level is excluded instead of delivered with a labelled mismatch. `find-from-sheet` creates a new contact sheet by searching the companies in an existing Atlas company sheet; `--filter` or `--row-ids` and `--row-limit` scope the source, `--icp-profile-id` screens source companies first, and a run above 10,000 effective companies is refused rather than truncated. `find-more` reruns people discovery on an existing Atlas contact sheet; `--mode net-new` searches only company seeds not previously delivered, while `--mode all` searches every seed again. Both consume credits, and row identity dedupe still prevents duplicate contacts.
 
 ## Personas
 
@@ -150,7 +173,7 @@ atlas personas save --id <persona_id> --keywords "revenue operations,revops"
 atlas personas save --id <persona_id> --hidden
 ```
 
-Personas (job functions) are the vocabulary `atlas prospects find` and `atlas build` select by id. Create with `--name` + `--keywords`; update by `--id` with ONLY the flags you are changing — omitted flags are preserved, so `--id X --hidden` is a pure hide and never overwrites newer edits (`--visible` unhides; hide works on system-default personas too). Keywords literally construct the people-search query, so they are validated and normalized on write: double quotes are stripped, bare `OR`/`AND`, a leading `-`, and `site:`/`intitle:`/`inurl:` are rejected, and the stored list is trimmed, lowercased, and deduped. The response echoes `effective_keywords` — what the query builder will ACTUALLY use after dropping standalone titles (CEO, CTO, …) and taxonomy-only tier labels (`c-level`); an empty echo carries a warning, because that persona's combo and fallback queries would search nothing. Requires an owner/admin key (persona writes are settings:manage-gated, exactly like the settings UI). There is no delete — hide instead — and seniority levels are read-only everywhere. `--instructions` sets `additional_instructions_default`; note `atlas vocabularies list` does not return that field — read it back from this command's response.
+Personas (job functions) are the vocabulary `atlas prospects find` and `atlas build` select by id. Create with `--name` + `--keywords`; update by `--id` with ONLY the flags you are changing — omitted flags are preserved, so `--id X --hidden` is a pure hide and never overwrites newer edits (`--visible` unhides; hide works on system-default personas too). Keywords literally construct the people-search query, so they are validated and normalized on write: double quotes are stripped, any keyword containing `:` or `|` is rejected, as are bare `OR`/`AND` and a leading `-`; the stored list is trimmed, lowercased, and deduped. The response echoes `effective_keywords` — what the query builder will ACTUALLY use after dropping standalone titles (CEO, CTO, …) and taxonomy-only tier labels (`c-level`); an empty echo carries a warning, because that persona's combo and fallback queries would search nothing. Requires an owner/admin key (persona writes are settings:manage-gated, exactly like the settings UI). There is no delete — hide instead — and seniority levels are read-only everywhere. `--instructions` sets `additional_instructions_default`; note `atlas vocabularies list` does not return that field — read it back from this command's response.
 
 ## Company discovery
 
@@ -164,6 +187,27 @@ Choose exactly one source: `--seeds` (comma-separated domains and/or LinkedIn co
 Delivery defaults to `--delivery atlas-only`, which never writes to HubSpot. To request writes explicitly, use `--delivery hubspot-upsert --dedup-mode upsert|skip`. Qualification requires `--qualify --icp-profile-id <uuid>`; `--scrape-similar` requests a second, provider-unit-consuming scrape. Hard ceilings are `--max-rows`, `--max-provider-units`, and `--max-atlas-credits`.
 
 `--plan-only` returns the signed 15-minute, single-use preview without dispatch. Without it, the CLI calls `atlas_execute_plan` with a separate durable execution key; `--wait` follows the returned discovery run. Identical retries after ambiguous failures reconcile the same plan/run. See the `company-discovery` skill for the complete workflow.
+
+## Company index search
+
+```
+atlas search values --facet naics --search 2382 --country US
+atlas search companies --country US --naics 2382 --size-bands 11-50,51-200 --limit 50
+atlas search companies-to-sheet --name "US HVAC contractors" --country US --naics 2382 --after-slug "" --max-rows 2000
+atlas index companies --refs '[{"linkedin_url":"https://www.linkedin.com/company/stripe"},{"name":"Plaid","domain":"plaid.com"}]'
+```
+
+The company index is shared reference data. `search values` lists NAICS codes, company types, tags, or LinkedIn industries (`--facet`) with company counts, optionally for one HQ `--country`. `search companies` is a read-only facet and text search with no seeds and no provider spend: NAICS prefixes, company types, and industries match ANY listed value, while `--tags` requires ALL of them. `search companies-to-sheet` takes the same facets and imports the matches into a company sheet. Matches without a domain are reported as `excluded_no_domain` and repeats as `duplicate_domain`, never silently dropped. `--after-slug ""` starts a cursor sweep bounded by `--max-rows` (default 2000, max 5000); continue into the same sheet with `--table-id <sheet id> --after-slug <next_cursor>`. `--limit`/`--offset` paging is the legacy mode and cannot be combined with `--after-slug`. `index companies` looks up to 25 references (LinkedIn company URL, or name with optional domain) through HarvestAPI: index hits are free, each successful new lookup costs 1 Atlas credit, and it requires “Let Atlas scrape on my behalf” under Settings → Web Scraping.
+
+## ICP profiles
+
+```
+atlas icp compile --text "US HVAC contractors with 20-200 employees; target owners and operations leaders" --json > icp-draft.json
+atlas icp save --draft icp-draft.json --name "US HVAC contractors"
+atlas icp list
+```
+
+`compile` turns a targeting sentence into a draft with both a company selector and a people selector. It makes one bounded BYOK model call that can consume provider quota, and it saves nothing. `save` persists the draft (`--base-profile` updates an existing profile; omitted fields are preserved). Personas the compile proposed are created only when you pass `--create-proposed`. `list` returns saved profiles; their ids feed `--icp-profile-id` on `discover companies` and `prospects find-from-sheet`, and the `icp_fit` enrichment.
 
 ## Provider balances
 
@@ -214,18 +258,29 @@ atlas mapping set --destination hubspot_contacts --mapping '{"src:linkedin_profi
 
 **Each destination field takes exactly one source.** A non-empty `conflicts` array means two or more sources point at one destination field — a misconfiguration, not a fallback: both values resolve for the same row and one silently overwrites the other. A write that would leave two keys on one target is rejected with `validation_failed`, and `error.data.conflicts` names every claiming key, its label, and its layer. `--on-conflict replace` takes the target from its current org-default claimant and CLEARS that one in the same write, reporting it in `cleared_keys`; it never stores both, and it still refuses when your own mapping names none of the claimants. On a sheet, exclude the inherited field instead by sending its `sheet_key` with value `null` in the same call. Report conflicts you did not create to the operator rather than repairing them unprompted — which field should own a property is their decision.
 
+## Suppression
+
+```
+atlas suppression add --domains competitor.com --emails jane@example.com --note "Asked not to be contacted"
+atlas suppression remove --emails jane@example.com
+atlas suppression list --kind domain --search competitor --limit 100
+```
+
+The suppression list is the organization's do-not-contact list. `add` and `remove` take comma-separated `--domains` and/or `--emails`, up to 500 entries per call. A domain is stored in registrable form and covers every address at it. Repeating `add` is safe and keeps the reason an entry was first added; `remove` is the only way an entry leaves the list. People search refuses to spend on a suppressed domain, and sequence enrollment drops a suppressed contact right before the send. `list` reads one page, newest first, filtered by `--kind` (`domain` or `email`) and `--search`, paged with `--limit` (max 500) and `--offset`.
+
 ## Export and sync
 
 ```
 atlas export gsheet tbl_123 col_456 --identity domain --column-header "Pricing URL" --filter-id flt_123
 atlas export hubspot-list tbl_companies --name "Q3 targets" --filter-id flt_123
+atlas export hubspot-contact-list tbl_contacts --name "Q3 contacts" --filter-id flt_456
 atlas export new-gsheet tbl_contacts --name "Enriched contacts" --filter-id flt_456
 atlas sync hubspot tbl_123 col_456 --property company_pitch --filter-id flt_123
 atlas sync gsheet tbl_contacts --identity email --existing only_if_empty --filter-id flt_123 --wait
 atlas sync webhook tbl_contacts --destination-id <endpoint_id> --filter-id flt_123 --wait
 ```
 
-`export hubspot-list` synchronously creates a new static list from a company sheet. It exports exactly the requested row/filter scope, skips and counts rows without a HubSpot company id, and returns the durable list id plus exact counts. A disconnected HubSpot account fails before creation.
+`export hubspot-list` synchronously creates a new static list from a company sheet. It exports exactly the requested row/filter scope, skips and counts rows without a HubSpot company id, and returns the durable list id plus exact counts. A disconnected HubSpot account fails before creation. `export hubspot-contact-list` does the same from a contact sheet, capped at 10,000 rows; rows without a HubSpot contact id are skipped and counted.
 
 `export new-gsheet` synchronously creates a spreadsheet in the calling user's personal Google account. It supports company and contact sheets, exports exactly the requested row/filter scope, and includes every visible identity, source, result, and enrichment column. Formula-like headers and values are neutralized. The request is capped at 2,000 rows, 500 columns, 100,000 output cells, and 4 MB. Missing or stale personal Google OAuth returns reconnect guidance before creation.
 
@@ -235,7 +290,17 @@ Both new-object exports journal a request-specific staging name and durable exte
 
 `sync webhook` POSTs the sheet's already-saved Send to → Webhook mapping to one of the organization's saved endpoints, one signed JSON envelope per batch. `--destination-id` is required and comes from `atlas mapping get --destination webhook --table <table_id>`, which is the only place endpoint ids are published; no command ever returns the bearer token or signing secret. An empty mapping fails before a run is created. Pass at most one of `--row-ids`, `--filter`, or `--filter-id` — with none of them, EVERY row in the sheet is sent to a third-party URL. A webhook run is neither retryable nor resumable: recover by running the command again with a new idempotency key. `cancel` works and stops the next batch.
 
-These four run dispatchers accept `--wait`.
+```
+atlas sequences list
+atlas sequences list instantly
+atlas sequences enroll tbl_contacts --destination instantly --sequence-id <campaign_id> --filter-id flt_123 --wait
+```
+
+`sequences list` with no argument reports which sequence platforms the organization has connected and makes no vendor call; with `instantly` or `smartlead` it lists that account's live campaigns, each with a status label and whether it is currently sending. An empty account returns an empty campaign list with guidance rather than an error, and a vendor outage is reported as a retryable failure rather than as "no campaigns".
+
+`sequences enroll` adds a contact sheet's rows to one campaign. `--destination` and `--sequence-id` are required, the sheet's saved destination mapping must include email, and you pass at most one of `--row-ids`, `--filter`, or `--filter-id` — with none of them EVERY row is enrolled. Atlas verifies membership with the platform before recording each person's outcome. A sequence run is neither retryable nor resumable: recover by running the command again with a new idempotency key; recorded enrollments stop a confirmed member being added twice.
+
+These five run dispatchers accept `--wait`.
 
 ## Runs
 
@@ -273,10 +338,40 @@ atlas tools call atlas_list_sheets --json-args '{"limit":5}'
 atlas tools call atlas_read_sheet --json-args '{"table_id":"tbl_123","filter_id":"flt_1"}'
 ```
 
-Raw schema-level access to every MCP tool. This is useful for low-level automation, and it is the only way to reach `atlas_read_job_evidence`; every other current tool also has a curated command with command-specific validation, durable retry journal, and help. `tools call` injects a fresh idempotency key when the live schema requires one, but it does not journal that key across process invocations. For a mutating or BYOK-paid raw call that may need retry, provide `idempotency_key` in `--json-args`, retain it, and reuse it after ambiguous failures. After terminal `dispatch_incomplete`, use a new key. After `provider_call_uncertain`, keep the old key pinned for replay and review provider usage; use a new key only when explicitly starting another paid request. Prefer the curated command for agent workflows.
+Raw schema-level access to every MCP tool. This is useful for low-level automation, and it is how to reach the two raw-only read tools: `atlas_read_job_evidence` and `atlas_read_customer_reviews`. Curated commands add command-specific validation, a durable retry journal, and help where available. `tools call` injects a fresh idempotency key when the live schema requires one, but it does not journal that key across process invocations. For a mutating or BYOK-paid raw call that may need retry, provide `idempotency_key` in `--json-args`, retain it, and reuse it after ambiguous failures. After terminal `dispatch_incomplete`, use a new key. After `provider_call_uncertain`, keep the old key pinned for replay and review provider usage; use a new key only when explicitly starting another paid request. Prefer the curated command for agent workflows.
 
 ## Environment variables
 
 - `ATLAS_API_KEY` — API key for CI/headless use; overrides the stored credentials file. When set, the stored file is skipped entirely — including its URL — so an env-provided prod key can never silently pair with a stale stored origin (e.g. a localhost left behind by a dev `atlas login`).
 - `ATLAS_API_URL` — API origin override. Resolution order: `ATLAS_API_URL` env > stored credentials file > default `https://app.atlasprospect.ai`. (With `ATLAS_API_KEY` set, the stored step is skipped: env > default only.) Every resolved endpoint must be a credential-free HTTPS origin; plain HTTP is allowed only for exact loopback development hosts. Userinfo, paths, queries, fragments, and insecure remote URLs fail locally before an MCP transport can receive the bearer key.
 - `ATLAS_CONFIG_HOME` — config directory override (default `~/.config/atlas`). Both `credentials.json` (written by `atlas login`, mode 0600) and `pending-requests.json` (the crash-safe idempotency journal) live here.
+
+
+## Reporting a problem to Atlas
+
+`atlas feedback report` requires Atlas CLI 0.1.3 or later. On an older CLI, use
+`atlas tools call atlas_report_feedback` with the same fields.
+File only a genuine Atlas bug or small improvement, after following the documented
+recovery. Do not file for harness/network issues, your own mistakes, a successful retry,
+or work outside Atlas's purpose. Never paste contact details, sheet content or credentials.
+
+Use `call_ref` from a successful response or `error.data.call_ref` from an error:
+
+```sh
+atlas feedback report --category wrong_result --call-ref '<call_ref>' \
+  --user-goal 'Read the documented sheet summary' \
+  --what-i-tried 'Checked the docs and followed the recovery step' \
+  --what-happened 'The response contradicted the documented behavior' \
+  --smallest-change 'Return the documented summary field' --json
+```
+
+On a CLI older than 0.1.3:
+
+```sh
+atlas tools call atlas_report_feedback --json-args '{"category":"wrong_result","call_ref":"<call_ref>","user_goal":"Read the documented sheet summary","what_i_tried":"Checked the docs and followed the recovery step","what_happened":"The response contradicted the documented behavior","smallest_change":"Return the documented summary field"}' --json
+```
+
+Repeated errors require three matching errors on the same key within 60 minutes.
+`error.data.feedback_hint` may suggest filing once when recovery has failed.
+Reports go to a human, change nothing automatically and get no reply. File once;
+`feedback_refused` exits 1, includes `error.data.reason`, and means do not retry.

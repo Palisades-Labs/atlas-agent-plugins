@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.10 - 2026-10-11
+
+- Pinned Atlas CLI v0.1.3 and its verified release digests.
+- Clarified that runs without a materialized row scope, including `find_people_batch`, cannot be retried or resumed and must be dispatched as new runs.
+
+## 0.1.9 - 2026-10-10
+
+- Updated the enrichment skill for the summary-by-default `atlas_capabilities` reply: `atlas status` lists each operation in one line, and one operation's input requirements, provider requirements and config example come from `atlas tools call atlas_capabilities --json-args '{"operation":"<op>"}'`.
+
 ## 0.1.8 - 2026-08-16
 
 - Pinned Atlas CLI v0.1.2 and its verified release digests.

@@ -89,7 +89,7 @@ atlas discover companies \
   --plan-only --json
 ```
 
-`--scrape-similar` adds a second BrightData pass and increases the provider-unit ceiling. Keep it off unless the user needs richer firmographics for discovered companies.
+`--scrape-similar` looks up each discovered company through the Atlas company index: free when already indexed, otherwise 1 Atlas credit each, and it raises the Atlas-credit ceiling. Keep it off unless the user needs richer firmographics.
 
 ## 6. Execute and inspect
 
