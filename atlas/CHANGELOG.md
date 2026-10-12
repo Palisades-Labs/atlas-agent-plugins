@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.12 - 2026-10-12
+
+- Pinned Atlas CLI v0.1.4 and its verified release digests.
+- Published target-specific keyless Sigstore bundles for all supported binaries.
+
 ## 0.1.11 - 2026-10-12
 
 - Added troubleshooting guidance for auditing a sheet's wiring with `atlas_list_webhook_sources`, `atlas_list_automations`, and `atlas_inspect_webhook_source`.
