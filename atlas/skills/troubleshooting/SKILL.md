@@ -83,8 +83,8 @@ Use `atlas_report_feedback` with the affected `call_ref` (success top level, or
 `missing_capability`), and `user_goal`, `what_i_tried`, `what_happened`, `smallest_change`.
 Repeated errors require three matching failures on the same key within 60 minutes.
 `error.data.feedback_hint` may name a qualifying call; report once only if recovery did not help.
-The next CLI release adds `atlas feedback report`; published CLIs can use
-`atlas tools call atlas_report_feedback --json-args '<JSON>' --json` now.
+From the terminal, run `atlas feedback report` (Atlas CLI 0.1.3 or later); an older CLI can use
+`atlas tools call atlas_report_feedback --json-args '<JSON>' --json`.
 
 Write in your own words without row values, contact details, credentials or sheet content.
 Reports go only to a human operator, never trigger an automated fix, and get no reply.
