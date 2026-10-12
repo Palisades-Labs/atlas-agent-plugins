@@ -1,6 +1,6 @@
 ---
 name: sheets
-description: Create, import, read, widen, append, re-pull, filter, repair, export, sync, archive, and restore Atlas sheets. Use when the user says "create a sheet", "import this CSV", "import a Google Sheet", "add these source fields", "find more people", "filter these rows", "correct this value", "delete these rows", "create a HubSpot list", "create a new Google Sheet", "write this back to Google Sheets", "send these rows to our webhook", "show me the rows", "pull the latest rows", "archive that sheet", or "restore that sheet".
+description: Create, import, read, widen, append, re-pull, filter, repair, export, sync, archive, and restore Atlas sheets. Use when the user says "create a sheet", "import this CSV", "import a Google Sheet", "add these source fields", "find more people", "filter these rows", "correct this value", "delete these rows", "create a HubSpot list", "create a new Google Sheet", "write this back to Google Sheets", "send these rows to our webhook", "add these people to a sequence", "show me the rows", "pull the latest rows", "archive that sheet", or "restore that sheet".
 ---
 
 # Working with Sheets
@@ -64,7 +64,7 @@ atlas sheets list
 atlas sheets read <table_id>
 ```
 
-`sheets list` shows the org's sheets, newest-updated first (`--type` filters, `--all` includes archived). `sheets read` returns a columns legend plus rows as flat records, cursor-paginated (`--limit` up to 200, pass `--cursor` from the previous page). Index row values by each column's `record_key` from the legend, not its display name.
+`sheets list` shows the org's sheets, newest-updated first (`--type` filters, `--all` includes archived). `sheets read` returns a columns legend plus rows as flat records, cursor-paginated (`--limit` up to 200, pass `--cursor` from the previous page). Index row values by each column's `record_key` from the legend, not its display name. Every row also carries the sheet's identity fields under their own record keys (`company_name`, `domain`, `linkedin_url`, `hubspot_id`; contact sheets add `full_name`, `title`, `email`), whether or not the sheet has enrichment columns, so a read always says which company or person each record describes.
 
 ## Add rows (append to an EXISTING sheet)
 
@@ -147,11 +147,27 @@ atlas sync webhook <table_id> --destination-id <endpoint_id> --filter-id <filter
 
 This POSTs every field in the sheet's saved **Send to → Webhook** mapping to one of the organization's saved endpoints, one signed JSON envelope per batch. Configure that mapping in Atlas first; an empty mapping fails before a run is created.
 
-`--destination-id` is the saved endpoint's id, and there is exactly one place to find it: `atlas mapping get --destination webhook --table <table_id>` (the `atlas_get_destination_mapping` tool with `destination_id: "webhook"`). Its `webhook_endpoints` list carries `id`, `name`, `scope` (`org` or `table`), `url`, `token_prefix`, and `is_active` for the org's endpoints plus this sheet's own — exactly the set the send accepts, and only active ones. Endpoint bearer tokens and signing secrets are shown once at creation and are never returned by any command.
+`--destination-id` is the saved endpoint's id, and there is exactly one place to find it: `atlas mapping get --destination webhook --table <table_id>` (the `atlas_get_destination_mapping` tool with `destination_id: "webhook"`). Its `webhook_endpoints` list carries `id`, `name`, `scope` (`org` or `table`), `host`, `token_prefix`, and `is_active` for the org's endpoints plus this sheet's own — exactly the set the send accepts, and only active ones. Endpoint bearer tokens and signing secrets are shown once at creation and are never returned by any command.
 
 Scope the run with at most one of `--row-ids`, `--filter`, or `--filter-id`. Passing none of them sends **every row in the sheet** — always state the row count to the user before dispatching, because these rows leave Atlas for a third-party URL and only the mapping decides what travels.
 
 A webhook send is neither retryable nor resumable: its per-row delivery claims cannot be cloned onto a new run, so `atlas runs retry` and `atlas runs resume` refuse it. Recover by sending again with a new idempotency key. `atlas runs cancel` works and stops the next batch.
+
+## Add contacts to an email sequence
+
+```
+atlas sequences list
+atlas sequences list instantly
+atlas sequences enroll <table_id> --destination instantly --sequence-id <campaign_id> --filter-id <filter_id> --wait
+```
+
+`sequences list` with no argument reports which platforms the organization has connected and makes no vendor call. With `instantly` or `smartlead` it lists that account's live campaigns, each with a status label and whether it is currently sending. An empty account returns an empty list with guidance, not an error.
+
+`sequences enroll` works on **contact sheets only** and requires a saved **Send to → Instantly / Smartlead** mapping that includes email; the run refuses before it is created otherwise. Read the accepted target names from `atlas mapping get --destination instantly_campaign --table <table_id>` — its `sequence_targets` carries the exact `standard` field names, which are `required`, and the custom-variable key pattern. Target names outside that list are accepted as **custom variables** rather than rejected, so a near-miss like `title` instead of `job_title` silently ships a value the campaign template never reads.
+
+Scope with at most one of `--row-ids`, `--filter`, or `--filter-id`. Passing none enrols **every row in the sheet** — always state the row count first, because these people leave Atlas for a third-party platform and will be emailed by it. Filter and whole-sheet scopes are capped at 5,000 rows.
+
+Atlas verifies membership with the platform before recording each person's outcome, and a person already recorded as a confirmed member of that campaign is not added twice. A sequence run is neither retryable nor resumable: recover by running the command again with a new idempotency key. `atlas runs cancel` works and stops the next batch.
 
 ## Create a new HubSpot list or Google Spreadsheet
 

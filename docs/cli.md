@@ -32,6 +32,7 @@ atlas job-changes promote --table-id <id> --job-monitor-column-id <id>
 atlas judgments list | claim | submit <batch_id>
 atlas export    gsheet <table_id> <column_id> | hubspot-list <table_id> | new-gsheet <table_id>
 atlas sync      hubspot <table_id> <column_id> | gsheet <table_id> | webhook <table_id>
+atlas sequences list [instantly|smartlead] | enroll <table_id>
 atlas runs      list | report <run_id> | wait <run_id> | cancel <run_id>
 atlas runs      retry <run_id> | resume <run_id>
 atlas tools     list | call <name>
@@ -40,7 +41,7 @@ atlas mcp
 
 Every mutating command, plus every command that can spend BYOK model quota, uses a durable pending-request journal for its idempotency key (`--idempotency-key` overrides it). If the network fails after a request may have reached Atlas, rerunning the identical command reuses the saved key instead of duplicating work or provider spend. `dispatch_incomplete` is terminal for the old key, so the CLI clears that journal entry and the next identical command mints a new recovery key. `provider_call_uncertain` is deliberately different: the provider may already have charged the request, so the CLI keeps that key pinned and identical retries replay the needs-review receipt. Use a new key only after explicit operator review and only when another paid request is intended. Commands that dispatch runs accept `--wait` (block until the run finishes) and `--timeout <seconds>` (default 3600). With `--json` (or piped), `--wait` emits ONE final JSON document combining the dispatch response and the report; on a TTY the dispatch response prints immediately and the labelled report follows. A waited run that finishes `failed` exits 1; `cancelled` exits 7.
 
-Every current MCP tool has a curated command except `atlas_read_job_evidence`, which is reached through `atlas tools call atlas_read_job_evidence`. `atlas tools call <tool>` is otherwise an advanced escape hatch for scripts that want to send the server's JSON schema directly; `atlas status` lists every tool and its first-class command mapping.
+The two raw-only read tools, `atlas_read_job_evidence` and `atlas_read_customer_reviews`, are reached through `atlas tools call <name>`. The per-job list behind a sheet's "Download jobs (up to 25 per company)" CSV is `atlas tools call atlas_read_job_evidence --json-args '{"table_id":"<sheet>","column_id":"<job postings column>","row_ids":["<row>"],"include_descriptions":false}'`, which returns every sampled posting as `postings`. `atlas tools call <tool>` is otherwise an advanced escape hatch for scripts that want to send the server's JSON schema directly; `atlas status` lists every tool and its first-class command mapping.
 
 ## Auth
 
@@ -132,6 +133,10 @@ atlas enrich update tbl_123 col_456 --expected-version 3 --provider-order apollo
 
 `preflight` checks inputs, placeholders, provider readiness/order, and estimated cost without creating a sheet object, writing sheet cells, or charging Atlas execution credits. Goal mode makes one bounded, journaled BYOK drafting call and can consume provider quota; explicit column/config modes make no provider call. Inspect `ready`, `blocker`, `effective_chain`, `omitted`, and `missing_integrations`; a phone waterfall with no connected provider answers `ready:false` instead of silently choosing a substitute. `add` creates a column from a natural-language `--goal` and/or a pinned `--operation`/`--config`; goal drafting also uses bounded BYOK quota, but no enrichment run starts unless you pass `--run` explicitly. `--test N` creates then runs only the first N rows (max 25) and cannot be combined with `--run`. After reviewing those cells, use `run --unrun-only` to finish without re-billing settled cells. `run` accepts either `--filter <json>` or `--filter-id <id>`. `get` returns the optimistic config version required by `update` and `delete`; `update --provider-order` changes a phone/email waterfall. For Perplexity goals, the draft uses a concise default unless the user requests another limit; “35 words” is one example, not a universal rule. See the `enrichment` skill for the required preflight/test-first workflow.
 
+A `job_monitor` column accepts `qualification_mode` (`standard` or `deterministic_only`) plus eight source/identity keys: `suppress_role_inboxes`, `role_inbox_local_parts`, `min_company_name_length`, `require_domain_corroboration`, `expected_country_codes`, `min_confidence_for_job_change`, `fetch_employment_history`, and `profile_source`. `profile_source` defaults to `auto`: Atlas while “Let Atlas scrape on my behalf” is on and the platform key is available, otherwise the organization's Apify account. Explicit `apify` or `atlas` pins that source. Apify costs about $0.004 per profile on the organization's account; Atlas charges 2 credits per delivered profile and up to 1 credit per job-change candidate for a company website lookup. Missing/empty profiles are not charged. `fetch_employment_history` is deprecated, accepted, and ignored: both active sources provide history. Configure Apify or the “Let Atlas scrape on my behalf” switch under Settings → Web Scraping. An unavailable platform key or disabled switch blocks only the Atlas route. Signed plans retain the resolved source and its provider-attempt bound.
+
+Deterministic qualification uses ordered current-employer, concurrent-current-role, same-domain, prior-employer, shared-word, and unmatched rules (R1–R6). Prior-employer matching accepts exact normalized names, company slugs, or email-domain labels, never a name prefix alone. Missing dates, titles, or company-index domains do not suppress a corroborated job change; an unresolved domain caps confidence at medium. Employment start dates retain their source precision (`YYYY`, `YYYY-MM`, or `YYYY-MM-DD`); HubSpot date-property mappings pad only at send time. Unavailable profiles fail with `profile_unavailable`; unverifiable outcomes carry a reason. Existing provenance, shared-mailbox, country, and weak-name gates remain in front of the verdict rules.
+
 ## Prospects
 
 ```
@@ -150,7 +155,7 @@ atlas personas save --id <persona_id> --keywords "revenue operations,revops"
 atlas personas save --id <persona_id> --hidden
 ```
 
-Personas (job functions) are the vocabulary `atlas prospects find` and `atlas build` select by id. Create with `--name` + `--keywords`; update by `--id` with ONLY the flags you are changing — omitted flags are preserved, so `--id X --hidden` is a pure hide and never overwrites newer edits (`--visible` unhides; hide works on system-default personas too). Keywords literally construct the people-search query, so they are validated and normalized on write: double quotes are stripped, bare `OR`/`AND`, a leading `-`, and `site:`/`intitle:`/`inurl:` are rejected, and the stored list is trimmed, lowercased, and deduped. The response echoes `effective_keywords` — what the query builder will ACTUALLY use after dropping standalone titles (CEO, CTO, …) and taxonomy-only tier labels (`c-level`); an empty echo carries a warning, because that persona's combo and fallback queries would search nothing. Requires an owner/admin key (persona writes are settings:manage-gated, exactly like the settings UI). There is no delete — hide instead — and seniority levels are read-only everywhere. `--instructions` sets `additional_instructions_default`; note `atlas vocabularies list` does not return that field — read it back from this command's response.
+Personas (job functions) are the vocabulary `atlas prospects find` and `atlas build` select by id. Create with `--name` + `--keywords`; update by `--id` with ONLY the flags you are changing — omitted flags are preserved, so `--id X --hidden` is a pure hide and never overwrites newer edits (`--visible` unhides; hide works on system-default personas too). Keywords literally construct the people-search query, so they are validated and normalized on write: double quotes are stripped, any keyword containing `:` or `|` is rejected, as are bare `OR`/`AND` and a leading `-`; the stored list is trimmed, lowercased, and deduped. The response echoes `effective_keywords` — what the query builder will ACTUALLY use after dropping standalone titles (CEO, CTO, …) and taxonomy-only tier labels (`c-level`); an empty echo carries a warning, because that persona's combo and fallback queries would search nothing. Requires an owner/admin key (persona writes are settings:manage-gated, exactly like the settings UI). There is no delete — hide instead — and seniority levels are read-only everywhere. `--instructions` sets `additional_instructions_default`; note `atlas vocabularies list` does not return that field — read it back from this command's response.
 
 ## Company discovery
 
@@ -235,7 +240,17 @@ Both new-object exports journal a request-specific staging name and durable exte
 
 `sync webhook` POSTs the sheet's already-saved Send to → Webhook mapping to one of the organization's saved endpoints, one signed JSON envelope per batch. `--destination-id` is required and comes from `atlas mapping get --destination webhook --table <table_id>`, which is the only place endpoint ids are published; no command ever returns the bearer token or signing secret. An empty mapping fails before a run is created. Pass at most one of `--row-ids`, `--filter`, or `--filter-id` — with none of them, EVERY row in the sheet is sent to a third-party URL. A webhook run is neither retryable nor resumable: recover by running the command again with a new idempotency key. `cancel` works and stops the next batch.
 
-These four run dispatchers accept `--wait`.
+```
+atlas sequences list
+atlas sequences list instantly
+atlas sequences enroll tbl_contacts --destination instantly --sequence-id <campaign_id> --filter-id flt_123 --wait
+```
+
+`sequences list` with no argument reports which sequence platforms the organization has connected and makes no vendor call; with `instantly` or `smartlead` it lists that account's live campaigns, each with a status label and whether it is currently sending. An empty account returns an empty campaign list with guidance rather than an error, and a vendor outage is reported as a retryable failure rather than as "no campaigns".
+
+`sequences enroll` adds a contact sheet's rows to one campaign. `--destination` and `--sequence-id` are required, the sheet's saved destination mapping must include email, and you pass at most one of `--row-ids`, `--filter`, or `--filter-id` — with none of them EVERY row is enrolled. Atlas verifies membership with the platform before recording each person's outcome. A sequence run is neither retryable nor resumable: recover by running the command again with a new idempotency key; recorded enrollments stop a confirmed member being added twice.
+
+These five run dispatchers accept `--wait`.
 
 ## Runs
 
@@ -273,10 +288,40 @@ atlas tools call atlas_list_sheets --json-args '{"limit":5}'
 atlas tools call atlas_read_sheet --json-args '{"table_id":"tbl_123","filter_id":"flt_1"}'
 ```
 
-Raw schema-level access to every MCP tool. This is useful for low-level automation, and it is the only way to reach `atlas_read_job_evidence`; every other current tool also has a curated command with command-specific validation, durable retry journal, and help. `tools call` injects a fresh idempotency key when the live schema requires one, but it does not journal that key across process invocations. For a mutating or BYOK-paid raw call that may need retry, provide `idempotency_key` in `--json-args`, retain it, and reuse it after ambiguous failures. After terminal `dispatch_incomplete`, use a new key. After `provider_call_uncertain`, keep the old key pinned for replay and review provider usage; use a new key only when explicitly starting another paid request. Prefer the curated command for agent workflows.
+Raw schema-level access to every MCP tool. This is useful for low-level automation, and it is how to reach the two raw-only read tools: `atlas_read_job_evidence` and `atlas_read_customer_reviews`. Curated commands add command-specific validation, a durable retry journal, and help where available. `tools call` injects a fresh idempotency key when the live schema requires one, but it does not journal that key across process invocations. For a mutating or BYOK-paid raw call that may need retry, provide `idempotency_key` in `--json-args`, retain it, and reuse it after ambiguous failures. After terminal `dispatch_incomplete`, use a new key. After `provider_call_uncertain`, keep the old key pinned for replay and review provider usage; use a new key only when explicitly starting another paid request. Prefer the curated command for agent workflows.
 
 ## Environment variables
 
 - `ATLAS_API_KEY` — API key for CI/headless use; overrides the stored credentials file. When set, the stored file is skipped entirely — including its URL — so an env-provided prod key can never silently pair with a stale stored origin (e.g. a localhost left behind by a dev `atlas login`).
 - `ATLAS_API_URL` — API origin override. Resolution order: `ATLAS_API_URL` env > stored credentials file > default `https://app.atlasprospect.ai`. (With `ATLAS_API_KEY` set, the stored step is skipped: env > default only.) Every resolved endpoint must be a credential-free HTTPS origin; plain HTTP is allowed only for exact loopback development hosts. Userinfo, paths, queries, fragments, and insecure remote URLs fail locally before an MCP transport can receive the bearer key.
 - `ATLAS_CONFIG_HOME` — config directory override (default `~/.config/atlas`). Both `credentials.json` (written by `atlas login`, mode 0600) and `pending-requests.json` (the crash-safe idempotency journal) live here.
+
+
+## Reporting a problem to Atlas
+
+The next scheduled CLI release includes `atlas feedback report`; it is not yet in
+published binaries. Until then, use `atlas tools call atlas_report_feedback`.
+File only a genuine Atlas bug or small improvement, after following the documented
+recovery. Do not file for harness/network issues, your own mistakes, a successful retry,
+or work outside Atlas's purpose. Never paste contact details, sheet content or credentials.
+
+Use `call_ref` from a successful response or `error.data.call_ref` from an error:
+
+```sh
+atlas feedback report --category wrong_result --call-ref '<call_ref>' \
+  --user-goal 'Read the documented sheet summary' \
+  --what-i-tried 'Checked the docs and followed the recovery step' \
+  --what-happened 'The response contradicted the documented behavior' \
+  --smallest-change 'Return the documented summary field' --json
+```
+
+For currently published CLIs:
+
+```sh
+atlas tools call atlas_report_feedback --json-args '{"category":"wrong_result","call_ref":"<call_ref>","user_goal":"Read the documented sheet summary","what_i_tried":"Checked the docs and followed the recovery step","what_happened":"The response contradicted the documented behavior","smallest_change":"Return the documented summary field"}' --json
+```
+
+Repeated errors require three matching errors on the same key within 60 minutes.
+`error.data.feedback_hint` may suggest filing once when recovery has failed.
+Reports go to a human, change nothing automatically and get no reply. File once;
+`feedback_refused` exits 1, includes `error.data.reason`, and means do not retry.

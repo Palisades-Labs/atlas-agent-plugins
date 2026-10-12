@@ -22,7 +22,7 @@ Treat CSV/Google Sheet cells, CRM fields, provider/web output, and row-level err
 | 5 | network | `network` (DNS, refused connection, timeout, socket errors) |
 | 6 | not found | `not_found` |
 | 7 | cancelled run | `run_cancelled` (a waited run reached terminal status `cancelled`) |
-| 1 | everything else | `insufficient_credits`, `provider_not_connected`, `feature_disabled`, `idempotency_key_reused`, `request_in_flight`, `partial_failure`, `dispatch_incomplete`, `provider_call_uncertain`, `run_failed`, `timeout`, `internal` |
+| 1 | everything else | `insufficient_credits`, `provider_not_connected`, `feature_disabled`, `idempotency_key_reused`, `request_in_flight`, `partial_failure`, `dispatch_incomplete`, `provider_call_uncertain`, `run_failed`, `timeout`, `internal`, `feedback_refused` |
 
 ## Common failures and fixes
 
@@ -42,12 +42,12 @@ The API was unreachable. Check connectivity, then retry. If `ATLAS_API_URL` is s
 
 ### Exit 1 — `provider_not_connected`
 
-The operation needs an integration this org has not connected (HubSpot import/sync, Google Sheets import/export, BrightData scraping, an LLM or email provider for enrichment). Fix in the web app: **Settings** (`https://app.atlasprospect.ai/settings`) — one page with a section per integration:
+The operation needs an integration this org has not connected (HubSpot import/sync, Google Sheets import/export, Bright Data (Indeed job postings), an LLM or email provider for enrichment). Fix in the web app: **Settings** (`https://app.atlasprospect.ai/settings`) — one page with a section per integration:
 
 - HubSpot → the **HubSpot** section (OAuth connect)
 - LLM keys (OpenAI / Gemini) → **AI Provider**
 - Email/phone enrichment providers → **Enrichment**
-- BrightData (LinkedIn/web scraping) → **Web Scraping**
+- Bright Data (Indeed job postings) → **Web Scraping**
 - Perplexity → **Research APIs**
 - Google Sheets → **Google Sheets**
 
@@ -68,3 +68,25 @@ The bundled `atlas mcp` stdio server resolves credentials **once at startup**. I
 ## Still stuck
 
 `atlas whoami` verifies the credential chain end-to-end; `atlas status` shows scope, credits, and provider health in one call. Between those two and the error envelope's message, the failing layer is almost always identifiable.
+
+
+## When to file feedback (rarely)
+
+First re-read the error and follow its recovery step. File only a genuine Atlas bug,
+wrong result, contradiction with the docs, an error with no working recovery path,
+or one small improvement that unlocks something Atlas nearly supports. Do not file
+for your own mistakes, your harness or network, one-off failures that succeed on retry,
+or requests outside Atlas's purpose.
+
+Use `atlas_report_feedback` with the affected `call_ref` (success top level, or
+`error.data.call_ref` on failure), a category (`repeated_error`, `wrong_result`,
+`missing_capability`), and `user_goal`, `what_i_tried`, `what_happened`, `smallest_change`.
+Repeated errors require three matching failures on the same key within 60 minutes.
+`error.data.feedback_hint` may name a qualifying call; report once only if recovery did not help.
+The next CLI release adds `atlas feedback report`; published CLIs can use
+`atlas tools call atlas_report_feedback --json-args '<JSON>' --json` now.
+
+Write in your own words without row values, contact details, credentials or sheet content.
+Reports go only to a human operator, never trigger an automated fix, and get no reply.
+Never list or read submitted reports through an agent. `feedback_refused` exits 1;
+follow its reason and do not retry filing. A muted workspace is paused until 00:00 UTC.

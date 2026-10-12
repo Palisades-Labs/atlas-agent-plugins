@@ -89,11 +89,22 @@ All three are synchronous, require `exports:write`, and record a complete recove
 
 `atlas_send_to_webhook` delivers a sheet's rows to an endpoint the organization saved in Atlas, batched into signed JSON envelopes. It is the one export that sends data to a URL Atlas does not own, so the contract is deliberately narrow.
 
-- **Discover the endpoint first.** `destination_id` is an opaque uuid. Call `atlas_get_destination_mapping` with `destination_id: "webhook"` — the reply carries `webhook_endpoints`, each with `id`, `name`, `scope` (`org` or `table`), `table_id`, `url`, `token_prefix`, and `is_active`. Passing `table_id` returns that sheet's own endpoints plus every org-level one, which is exactly the set the send accepts. Only active endpoints are listed.
+- **Discover the endpoint first.** `destination_id` is an opaque uuid. Call `atlas_get_destination_mapping` with `destination_id: "webhook"` — the reply carries `webhook_endpoints`, each with `id`, `name`, `scope` (`org` or `table`), `table_id`, `host`, `token_prefix`, and `is_active`. Passing `table_id` returns that sheet's own endpoints plus every org-level one, which is exactly the set the send accepts. Only active endpoints are listed.
 - **Secrets are never returned.** The bearer token and the HMAC signing secret are shown once, in the web app, when the endpoint is created or rotated. No tool returns either value or its ciphertext; `token_prefix` is a 12-character label, not a credential.
+- **The full endpoint URL is never returned.** For some receivers, such as a Slack incoming webhook, the URL itself is the credential, so tools report only its `host` (null when the stored value does not parse), and a failed delivery's error has the URL's path and query redacted.
 - **The mapping decides what leaves Atlas.** The fields sent are the sheet's saved Send to → Webhook mapping (read it with `atlas_get_destination_mapping`, write it with `atlas_set_destination_mapping`). A field excluded there is not sent. An empty mapping fails before a run row exists rather than delivering an empty payload.
 - **Scope rows** with exactly one of `row_ids`, `filter_id`, or an inline `filter`, resolved by the same oracle every other run and export uses.
 - **No manual recovery.** A webhook send is neither retryable nor resumable: its per-row delivery claims cannot be cloned onto a new run, so `atlas_retry_run` and `atlas_resume_run` refuse it. Recover by sending again with a NEW idempotency key. Cancel still works and stops subsequent batches.
+
+## Sequence enrollment
+
+`atlas_list_sequences` and `atlas_enroll_in_sequence` add people from a contact sheet to a campaign in the organization's own Instantly or Smartlead account. Atlas enrolls; it never sends email.
+
+- **Read connections before campaigns.** `atlas_list_sequences` with no arguments reports every sequence destination as `{destination_id, label, connected}` and makes NO vendor call. Pass `destination_id` (`instantly_campaign` or `smartlead_campaign`) to make one live lookup and receive `campaigns: [{id, name, status_label, sending}]`.
+- **An empty account is not an outage.** `campaigns: []` plus `guidance` is a real empty account. A vendor rejection returns `credential_invalid`, a disconnected destination returns `not_connected`, and a 429/5xx/network failure returns retryable `provider_unavailable` — never an empty list.
+- **Enrollment needs a campaign id from that list**, plus `table_id`, `destination_id`, and an `idempotency_key`. Scope rows with at most one of `row_ids` (≤1,000), an inline `filter`, or a saved `filter_id`; with none of them every row in the sheet is enrolled. The sheet's saved destination mapping must include `email`.
+- **Every person gets a definite answer.** After the platform accepts a batch, Atlas verifies membership before settling, so a row lands on `enrolled`, `already_in`, `skipped_duplicate`, `skipped_no_email`, `rejected`, or `failed`. `unconfirmed` appears only when the verification lookup itself could not be completed, and it claims nothing — the next enrollment retries that person.
+- **No manual recovery.** Like webhook sends, a sequence run is neither retryable nor resumable. Recover by enrolling again with a NEW idempotency key; the receipts stop a confirmed member being added twice.
 
 ## Bounded company discovery
 
@@ -107,9 +118,9 @@ For organizations with discovery review holds enabled, HubSpot delivery creates 
 
 ## Cold-start company search
 
-`atlas_search_companies` is the other half of finding companies: a free, instant, read-only search over the Atlas company index (~109k LinkedIn company records — global reference data shared by every org, deliberately not org-scoped). Use it when you have criteria but no seed companies: filter by `country_code`, `region` (US states are USPS codes), `size_bands` (LinkedIn's verbatim band strings, commas included), `industries` (matches if the company has ANY listed label), `min_employees_linkedin`, and a keyword `query` over name/specialties/description (quoted phrases, OR, `-` negation). At least one criterion is required; page with `limit` (≤200) / `offset`. It dispatches nothing and spends nothing — when you instead have seed companies and want paid lookalike expansion, plan it with `atlas_discover_companies`. The two headcount facets answer different questions: `min_employees_linkedin` counts profiles that actually exist, so it caps how many people contact search can FIND (companies under ~200 return very few regardless of true size); `size_bands` is LinkedIn's self-reported band and measures total workforce, including non-desk staff (call centers, field ops) who never create a profile. Filter on `min_employees_linkedin` when the list is for contact search, on `size_bands` when you care how many people the company employs.
+`atlas_search_companies` is a free, instant, read-only search over the shared Atlas company index. Use it when you have criteria but no seed companies: filter by `country_code`, `region`, `size_bands`, `industries` (ANY listed value), `naics_codes` (ANY matching NAICS prefix, such as `2382` or `238220`), `company_types` (ANY word or phrase in the company type, such as `equipment dealer`), `tags` (ALL listed lowercase tags), `min_employees_linkedin`, `max_employees_linkedin`, `exclude_organization_types` (such as `self_employed`), and a keyword `query` over name/company type/specialties/description. Unclassified companies have null classification fields and never match NAICS, company type or tag filters. Results include `naics_code`, `naics_title`, `company_type`, `tags`, `size_band_corrected` and `organization_type`; `atlas_list_company_index_values` gives the index size and available NAICS codes, company types, tags and industries with company counts for every country, or for one HQ country with `country_code` (such as `US`); `total_companies` is the exact company count in that scope as of `counts_as_of` (refreshed daily). For a live count of one filter combination, run `atlas_search_companies` and read `total_matched`. At least one criterion is required; results are ordered by LinkedIn profile count, most first (`sort: "fewest_profiles"` reverses it); page with `limit` (≤200) / `offset` (≤10,000). LinkedIn placeholder pages such as "None" or "Stealth Startup" are never returned. It dispatches nothing and spends nothing — when you instead have seed companies and want paid lookalike expansion, plan it with `atlas_discover_companies`. `min_employees_linkedin` counts existing LinkedIn profiles, while `size_bands` is the company's self-reported workforce band — except when its page has more than twice as many profiles as the band allows, in which case the company matches the band containing its profile count (shown as `size_band_corrected`).
 
-**Build the list with facets, not keywords.** `query` searches a company's own LinkedIn copy, and companies write about their products rather than their go-to-market. Measured on this index: of 25 companies a human rated textbook fits for a conversation-intelligence ICP, zero mentioned "inside sales", zero "licensed agent", zero "call center". Keyword-filtering on those phrases removes the best-fit accounts first. Use `industries` + `size_bands` to build the pool and judge fit per company afterwards; keep `query` for topics ("workers compensation", "auto lending"). When keywords do most of the narrowing, the response carries `match_count_without_keywords` and a plain-language `keyword_note` saying how many companies matched your filters but were dropped by the words.
+**Build the list with facets, not keywords.** `query` searches a company's own LinkedIn copy, and companies write about their products rather than their go-to-market. Measured on this index: of 25 companies a human rated textbook fits for a conversation-intelligence ICP, zero mentioned "inside sales", zero "licensed agent", zero "call center". Keyword-filtering on those phrases removes the best-fit accounts first. Use `industries`, `naics_codes` or `company_types` plus `size_bands` to build the pool and judge fit per company afterwards; keep `query` for topics ("workers compensation", "auto lending"). When keywords do most of the narrowing, the response carries `match_count_without_keywords` and a plain-language `keyword_note` saying how many companies matched your filters but were dropped by the words.
 
 ## Following runs: the wait_for_run pattern
 
@@ -134,3 +145,23 @@ Standard MCP client config (any Streamable-HTTP-capable client):
 ```
 
 Or run the local proxy after `atlas login`: `atlas mcp` (stdio) — no key handling in your client config at all. The proxy loads one complete remote tool catalog before opening its local MCP transport and bounds that connect/discovery step to 30 seconds, so it never serves a partial registry. The Codex plugin allows 300 seconds for a first verified CLI download and 90 seconds per tool call; Claude and Cursor continue to use their portable companion MCP files.
+
+
+## Reporting a problem to Atlas
+
+Use `atlas_report_feedback` rarely: for wrong results, a contradiction with Atlas docs,
+an error whose recovery did not help, or one small improvement that unlocks a task Atlas nearly supports.
+First re-read the error and follow its recovery step. Do not report your own mistakes,
+harness or network problems, one-off errors that succeeded on retry, or work outside Atlas's purpose.
+
+Authenticated successes include `call_ref`; failures include `error.data.call_ref`.
+Use the affected call's reference with category `repeated_error`, `wrong_result`, or
+`missing_capability`, and `user_goal`, `what_i_tried`, `what_happened`, `smallest_change`.
+A repeated error requires at least three matching failures on the same key within 60 minutes.
+An eligible repeated failure may include `error.data.feedback_hint`; it is an invitation
+only after recovery failed, never an instruction to report automatically.
+
+Describe the problem in your own words. Never paste contact details, credentials, row
+values or sheet content. Reports go only to a human operator, trigger no automatic action,
+and receive no reply. File once. A `feedback_refused` response explains the refusal;
+do not retry filing the report. Muted workspaces are paused until 00:00 UTC.
