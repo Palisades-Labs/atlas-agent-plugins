@@ -8,9 +8,9 @@ Ask your agent to import a CSV or Google Sheet, discover companies similar to a 
 
 | Agent | How |
 |---|---|
-| **Claude Code** | `/plugin marketplace add Palisades-Labs/atlas-agent-plugins@atlas--v0.1.8` then `/plugin install atlas@atlas-plugins` |
-| **Codex** | `codex plugin marketplace add Palisades-Labs/atlas-agent-plugins --ref atlas--v0.1.8` then `codex plugin add atlas@atlas-plugins` |
-| **Cursor** | Install the immutable `atlas--v0.1.8` release from Cursor Marketplace once listed; Team/Enterprise admins can import that tagged GitHub release from Dashboard → Plugins |
+| **Claude Code** | `/plugin marketplace add Palisades-Labs/atlas-agent-plugins@atlas--v0.1.9` then `/plugin install atlas@atlas-plugins` |
+| **Codex** | `codex plugin marketplace add Palisades-Labs/atlas-agent-plugins --ref atlas--v0.1.9` then `codex plugin add atlas@atlas-plugins` |
+| **Cursor** | Install the immutable `atlas--v0.1.9` release from Cursor Marketplace once listed; Team/Enterprise admins can import that tagged GitHub release from Dashboard → Plugins |
 
 ## Set up and authenticate
 
