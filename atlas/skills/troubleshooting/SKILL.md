@@ -1,6 +1,6 @@
 ---
 name: troubleshooting
-description: Diagnose and fix Atlas CLI and MCP failures - exit codes, auth errors, forbidden_scope, rate limits, provider_not_connected, stale credentials. Use when any atlas command errors, exits non-zero, returns an error envelope, or when Atlas MCP tools fail after a login or key change.
+description: Diagnose and fix Atlas CLI and MCP failures - exit codes, auth errors, forbidden_scope, rate limits, provider_not_connected, stale credentials. Use when any atlas command errors, exits non-zero, returns an error envelope, or when Atlas MCP tools fail after a login or key change, or when auditing how a sheet's inbound webhook source and automations are wired.
 ---
 
 # Troubleshooting Atlas
@@ -64,6 +64,18 @@ Tell the user which section, have them connect, then confirm with `atlas status`
 ### MCP server sees stale credentials
 
 The bundled `atlas mcp` stdio server resolves credentials **once at startup**. If tools fail auth right after `atlas login` (or after switching keys), the agent is holding a pre-login server — **restart the agent session**. This is the single most common post-setup failure; check it before anything else.
+
+## Audit how a sheet is wired
+
+1. Call `atlas_list_webhook_sources` with `table_id` to find the inbound source id and its state:
+   `atlas tools call atlas_list_webhook_sources --json-args '{"table_id":"<sheet-id>"}'`.
+2. Call `atlas_list_automations` with the same `table_id`:
+   `atlas tools call atlas_list_automations --json-args '{"table_id":"<sheet-id>"}'`.
+   Follow `linked_table_ids` by listing the linked sheets. Resolve `notify_destination_ids` through `atlas mapping get --destination webhook --table <id>` to identify the saved notification destinations.
+3. Call `atlas_inspect_webhook_source` with the discovered `source_id` to inspect held deliveries, the last event and its payload shape:
+   `atlas tools call atlas_inspect_webhook_source --json-args '{"source_id":"<source-id>"}'`.
+
+Both lists are read-only and use no credits. No list returns a receive URL, token or secret. Results are newest first; follow `next_cursor` with `cursor` until it is null. Omitting `table_id` covers every visible sheet; if more than 200 visible sheets have these resources, list one sheet at a time.
 
 ## Still stuck
 

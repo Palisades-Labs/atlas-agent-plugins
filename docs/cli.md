@@ -24,6 +24,8 @@ atlas cells     update <table_id> <row_id> <column_id>
 atlas enrich    preflight <table_id> | add <table_id> | run <column_id>
 atlas enrich    get <table_id> <column_id> | update ... | delete ...
 atlas schedules set <column_id> | list <table_id> | delete <column_id>
+atlas automations list [--table <id>] [--cursor <cursor>] [--limit <n>]
+atlas webhooks list [--table <id>] [--cursor <cursor>] [--limit <n>]
 atlas prospects find | find-from-sheet <table_id> | find-more <table_id>
 atlas discover companies
 atlas search    companies | companies-to-sheet | values
@@ -154,6 +156,11 @@ atlas schedules delete col_456
 
 `set` creates or replaces one enrichment column's recurring refresh: `--cadence-days` (1–90) is required, `--max-rows` caps each run, and `--disabled` saves the schedule without dispatching it. Each scheduled run refreshes already-settled cells with the column's normal provider and Atlas credits. `list` shows a sheet's schedules with row caps, next and last dispatch, failure count, and the last error. `delete` removes only the schedule — it never deletes the column or cancels a run already dispatched — and repeating it is safe.
 
+## Automations and webhook sources
+
+`atlas automations list [--table <id>]` lists visible sheets' automations and the sheet and saved notification destination ids they reference. `atlas webhooks list [--table <id>]` lists their inbound webhook sources, mapping status, signature verification state and event counts. Both are read-only, use no credits, and return newest first; use `--cursor` and `--limit` (max 100) to page. Omit `--table` to cover all visible sheets. Neither list returns a receive URL, token or signing secret.
+
+
 ## Prospects
 
 ```
@@ -196,6 +203,8 @@ atlas search companies --country US --naics 2382 --size-bands 11-50,51-200 --lim
 atlas search companies-to-sheet --name "US HVAC contractors" --country US --naics 2382 --after-slug "" --max-rows 2000
 atlas index companies --refs '[{"linkedin_url":"https://www.linkedin.com/company/stripe"},{"name":"Plaid","domain":"plaid.com"}]'
 ```
+
+NAICS groups dealers with distributors and wholesalers (4238/423840 includes Grainger and Fastenal); add `--company-types "equipment dealer"` to separate them.
 
 The company index is shared reference data. `search values` lists NAICS codes, company types, tags, or LinkedIn industries (`--facet`) with company counts, optionally for one HQ `--country`. `search companies` is a read-only facet and text search with no seeds and no provider spend: NAICS prefixes, company types, and industries match ANY listed value, while `--tags` requires ALL of them. `search companies-to-sheet` takes the same facets and imports the matches into a company sheet. Matches without a domain are reported as `excluded_no_domain` and repeats as `duplicate_domain`, never silently dropped. `--after-slug ""` starts a cursor sweep bounded by `--max-rows` (default 2000, max 5000); continue into the same sheet with `--table-id <sheet id> --after-slug <next_cursor>`. `--limit`/`--offset` paging is the legacy mode and cannot be combined with `--after-slug`. `index companies` looks up to 25 references (LinkedIn company URL, or name with optional domain) through HarvestAPI: index hits are free, each successful new lookup costs 1 Atlas credit, and it requires “Let Atlas scrape on my behalf” under Settings → Web Scraping.
 
