@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.11 - 2026-10-12
+
+- Added troubleshooting guidance for auditing a sheet's wiring with `atlas_list_webhook_sources`, `atlas_list_automations`, and `atlas_inspect_webhook_source`.
+- Clarified company search: `organization_type` is the page type a company chose on LinkedIn, unverified and not proof of ownership or a stock listing; NAICS codes group dealers with distributors, so add `company_types` to separate them; reviewed misleading pages are hidden like placeholder pages.
+
 ## 0.1.10 - 2026-10-11
 
 - Pinned Atlas CLI v0.1.3 and its verified release digests.
