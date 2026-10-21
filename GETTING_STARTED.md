@@ -14,14 +14,14 @@ This walkthrough takes you from a fresh install to your first Atlas commands. It
 **Claude Code**
 
 ```
-/plugin marketplace add Palisades-Labs/atlas-agent-plugins@atlas--v0.1.12
+/plugin marketplace add Palisades-Labs/atlas-agent-plugins@atlas--v0.1.13
 /plugin install atlas@atlas-plugins
 ```
 
 **Codex**
 
 ```
-codex plugin marketplace add Palisades-Labs/atlas-agent-plugins --ref atlas--v0.1.12
+codex plugin marketplace add Palisades-Labs/atlas-agent-plugins --ref atlas--v0.1.13
 codex plugin add atlas@atlas-plugins
 ```
 
@@ -30,7 +30,7 @@ codex plugin add atlas@atlas-plugins
 Install Atlas from Cursor Marketplace once it is listed. Team and Enterprise admins can instead import this GitHub repository from Dashboard → Plugins. For local testing before listing:
 
 ```
-git clone --branch atlas--v0.1.12 --depth 1 https://github.com/Palisades-Labs/atlas-agent-plugins.git
+git clone --branch atlas--v0.1.13 --depth 1 https://github.com/Palisades-Labs/atlas-agent-plugins.git
 mkdir -p ~/.cursor/plugins/local
 ln -s "$PWD/atlas-agent-plugins/atlas" ~/.cursor/plugins/local/atlas
 ```
@@ -44,20 +44,20 @@ The plugin bundles `bin/atlas`, a launcher that downloads the actual CLI binary 
 Download the binary and its matching `.sigstore.json` bundle, then run:
 
 ```sh
-cosign verify-blob atlas-darwin-arm64 --bundle atlas-darwin-arm64.sigstore.json --certificate-identity "https://github.com/blast-double/auto-prospector/.github/workflows/release-cli.yml@refs/tags/cli-v0.1.4" --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+cosign verify-blob atlas-darwin-arm64 --bundle atlas-darwin-arm64.sigstore.json --certificate-identity "https://github.com/blast-double/auto-prospector/.github/workflows/release-cli.yml@refs/tags/cli-v0.1.5" --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 ```
 
-Cosign 3.1.3 returns `Verified OK` for the live v0.1.4 asset. The `refs/tags/cli-v<version>` segment changes for each release; also replace the binary and bundle filenames for your platform.
+Cosign 3.1.4 returns `Verified OK` for the live v0.1.5 asset. The `refs/tags/cli-v<version>` segment changes for each release; also replace the binary and bundle filenames for your platform.
 
 GitHub CLI 2.93.0 can independently verify the downloaded asset against the immutable release:
 
 ```sh
-gh release verify-asset atlas-cli-v0.1.4 atlas-darwin-arm64 --repo Palisades-Labs/atlas-agent-plugins
+gh release verify-asset atlas-cli-v0.1.5 atlas-darwin-arm64 --repo Palisades-Labs/atlas-agent-plugins
 ```
 
 It returns `✓ Verification succeeded!`; its calculated digest matches the digest pinned by the Atlas plugin.
 
-Both commands name a release version, in different forms: `refs/tags/cli-v<version>` in the Cosign identity and `atlas-cli-v<version>` in the GitHub command. Change **both** to the release you actually downloaded — verifying a newer binary against `v0.1.4` fails for the wrong reason.
+Both commands name a release version, in different forms: `refs/tags/cli-v<version>` in the Cosign identity and `atlas-cli-v<version>` in the GitHub command. Change **both** to the release you actually downloaded — verifying a newer binary against `v0.1.5` fails for the wrong reason.
 
 On macOS, verify the signature **before** clearing Gatekeeper. Released binaries are not yet Apple-signed or notarized, so a browser download is quarantined. Once verification passes, make it executable first — a downloaded asset is not:
 

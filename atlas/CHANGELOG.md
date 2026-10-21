@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.13 - 2026-10-21
+
+- Pinned Atlas CLI v0.1.5 and its verified release digests.
+- Published target-specific keyless Sigstore bundles for all supported binaries.
+- Added `atlas job-changes check`, which runs a whole job-change check on an existing contact sheet or a HubSpot contact list; retrying the identical command after an interruption resumes safely.
+- Renamed `atlas job-changes promote` to `atlas job-changes copy` and the MCP tool `atlas_promote_job_changes` to `atlas_copy_job_changes`; the old names still work.
+- Added `atlas sync hubspot --unmatched skip`, which updates existing HubSpot records only and never creates new ones.
+- Preflight now reports job-monitor coverage, such as contacts missing a LinkedIn URL or a company baseline.
+
 ## 0.1.12 - 2026-10-12
 
 - Pinned Atlas CLI v0.1.4 and its verified release digests; it adds `atlas automations list` and `atlas webhooks list` for listing a sheet's automations and its inbound webhook source.
