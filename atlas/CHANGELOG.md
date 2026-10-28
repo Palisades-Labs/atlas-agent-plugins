@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.14 - 2026-10-28
+
+- Added `atlas_run_column_planned` to plan, run and return a report for up to 25 rows of an existing enrichment column in one call.
+- Run waiting now checks status every half second and reads the full report on completion.
+
 ## 0.1.13 - 2026-10-21
 
 - Pinned Atlas CLI v0.1.5 and its verified release digests.
